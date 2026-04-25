@@ -520,6 +520,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply += f"Could not find: {', '.join(failed)}"
     
     await update.message.reply_text(reply)
+
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     args = context.args
