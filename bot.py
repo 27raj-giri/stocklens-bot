@@ -1,4 +1,5 @@
 import os
+import re
 import yfinance as yf
 from groq import Groq
 from telegram import Update
@@ -15,11 +16,10 @@ groq_client = Groq(api_key=GROQ_API_KEY)
 def resolve_symbol(user_input):
     cleaned = user_input.strip().upper().replace(" ", "")
     
-    # List of suffixes to try
     attempts = [
-        cleaned,           # ZOMATO
-        cleaned + "LTD",   # ZOMATOLTD  
-        cleaned[:-3] if len(cleaned) > 3 else cleaned,  # trim last 3
+        cleaned,
+        cleaned + "LTD",
+        cleaned[:-3] if len(cleaned) > 3 else cleaned,
     ]
     
     for attempt in attempts:
@@ -32,7 +32,6 @@ def resolve_symbol(user_input):
         except:
             continue
     
-    # Try yfinance search as fallback
     try:
         search_results = yf.Search(user_input, max_results=10)
         quotes = search_results.quotes
@@ -75,7 +74,7 @@ def get_stock_data(user_input):
     except Exception as e:
         print(f"Error fetching data: {e}")
         return None
-# Sector peer mapping
+
 SECTOR_PEERS = {
     "Information Technology Services": ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS"],
     "Banks": ["HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "AXISBANK.NS", "SBIN.NS"],
@@ -88,7 +87,7 @@ SECTOR_PEERS = {
     "Telecom": ["BHARTIARTL.NS", "IDEA.NS"],
     "Steel": ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS"],
     "Power": ["NTPC.NS", "POWERGRID.NS", "ADANIGREEN.NS"],
-    "Insurance": ["HDFCLIFE.NS", "SBILIFE.NS", "ICICIlombard.NS"],
+    "Insurance": ["HDFCLIFE.NS", "SBILIFE.NS", "ICICIGI.NS"],
     "Consumer Cyclical": ["TATAMOTORS.NS", "MARUTI.NS", "TITAN.NS", "ASIANPAINT.NS"],
 }
 
@@ -119,23 +118,46 @@ def get_sector_context(industry, current_pe, current_symbol):
             return f"Sector average PE is {avg_pe}."
         
         if current_pe < avg_pe:
-            comparison = f"cheaper than sector average"
+            comparison = "cheaper than sector average"
         elif current_pe > avg_pe:
-            comparison = f"more expensive than sector average"
+            comparison = "more expensive than sector average"
         else:
-            comparison = f"in line with sector average"
+            comparison = "in line with sector average"
         
         return f"Sector average PE is {avg_pe}. This stock is {comparison} (stock PE: {current_pe}, sector avg: {avg_pe})."
     
     except Exception as e:
         print(f"Sector context error: {e}")
         return None
-    
+
+def escape_markdown(text):
+    # Escape special characters for Markdown but preserve * for bold
+    escape_chars = ['_', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in escape_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+
+def format_with_bold_headings(text):
+    headings = [
+        "STOCK ANALYSIS",
+        "WHAT DOES THIS COMPANY DO?",
+        "WHERE IS THE STOCK RIGHT NOW?",
+        "WHY THIS STOCK LOOKS GOOD:",
+        "WHAT COULD GO WRONG:",
+        "FINAL VERDICT:",
+        "LOOKS INTERESTING",
+        "WAIT AND WATCH",
+        "AVOID FOR NOW",
+    ]
+    for heading in headings:
+        text = text.replace(heading, f"*{heading}*")
+    return text
+
 def analyze_stock(data):
     try:
         sector_info = get_sector_context(data['industry'], data['pe_ratio'], data['symbol'])
         sector_line = f"- Sector Context: {sector_info}" if sector_info else ""
-        
+
         prompt = f"""
 You are a stock market expert who explains stocks to complete beginners in India.
 Your job is to make complex financial data easy to understand for someone who has never studied finance.
@@ -155,7 +177,7 @@ Here is the stock data:
 {sector_line}
 - Business: {data['summary'][:300]}
 
-Give analysis in this EXACT format:
+Give analysis in this EXACT format. Do not add any extra text outside this format:
 
 STOCK ANALYSIS - {data['name']}
 
@@ -176,8 +198,9 @@ WHAT COULD GO WRONG:
 - (Risk 3 explained simply)
 
 FINAL VERDICT:
-(Choose exactly one: LOOKS INTERESTING / WAIT AND WATCH / AVOID FOR NOW)
-(Then write 2-3 lines explaining the verdict in simple Hinglish that a beginner will understand)
+LOOKS INTERESTING
+
+(Then write 2-3 lines explaining the verdict in simple Hinglish that a beginner will understand. This explanation must be on a new line after a blank line.)
 
 Rules:
 - Never use financial jargon without explaining it
@@ -185,14 +208,17 @@ Rules:
 - Be decisive, give a clear opinion
 - No emojis
 - Never say consult a financial advisor
+- Always leave a blank line between the verdict word and the Hinglish explanation
 """
-        
+
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=800
         )
-        return response.choices[0].message.content
+        raw = response.choices[0].message.content
+        formatted = format_with_bold_headings(raw)
+        return formatted
     except Exception as e:
         print(f"Groq error: {e}")
         return f"Analysis failed: {e}"
@@ -207,21 +233,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not data or data['price'] == 'N/A':
         await update.message.reply_text(
-            "Stock not found. Try these:\n\nSymbols: TCS, RELIANCE, HDFCBANK, INFY\nNames: Zomato, Infosys, Tata Motors\n\nMake sure it is listed on NSE."
+            "Stock not found. Try these:\n\nSymbols: TCS, RELIANCE, HDFCBANK, INFY\nNames: Infosys, Tata Motors, HDFC Bank\n\nMake sure it is listed on NSE."
         )
         return
 
     analysis = analyze_stock(data)
-    await update.message.reply_text(analysis)
+    try:
+        await update.message.reply_text(analysis, parse_mode='Markdown')
+    except Exception:
+        # If Markdown fails, send as plain text
+        await update.message.reply_text(analysis)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Welcome to StockLens\n\nI analyze Indian stocks using real market data and AI.\n\nYou can send:\n- NSE symbol: TCS, RELIANCE, HDFCBANK\n- Company name: Zomato, Infosys, Tata Motors\n\nJust type any stock name or symbol to get started."
+        "Welcome to StockLens\n\nI analyze Indian stocks using real market data and AI.\n\nYou can send:\n- NSE symbol: TCS, RELIANCE, HDFCBANK\n- Company name: Infosys, Tata Motors, HDFC Bank\n\nJust type any stock name or symbol to get started."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "How to use StockLens:\n\n1. Send any stock name or NSE symbol\n2. Wait 10-15 seconds\n3. Get full AI analysis\n\nExamples:\nTCS\nZomato\nTata Motors\nHDFC Bank\nReliance\n\n/start - Welcome message\n/help - This message"
+        "How to use StockLens:\n\n1. Send any stock name or NSE symbol\n2. Wait 10-15 seconds\n3. Get full AI analysis\n\nExamples:\nTCS\nInfosys\nTata Motors\nHDFC Bank\nReliance\n\n/start - Welcome message\n/help - This message"
     )
 
 def main():
