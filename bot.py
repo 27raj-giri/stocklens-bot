@@ -106,7 +106,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     analysis = analyze_stock(data)
-    await update.message.reply_text(analysis, parse_mode='MarkdownV2')
+    await update.message.reply_text(analysis)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
