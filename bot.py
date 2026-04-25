@@ -1,6 +1,8 @@
 import os
 import re
 import yfinance as yf
+import urllib.request
+import json
 from groq import Groq
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
@@ -672,6 +674,268 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(message)
 
+def load_amfi_funds():
+    try:
+        data = urllib.request.urlopen('https://www.amfiindia.com/spages/NAVAll.txt').read().decode('utf-8')
+        lines = data.split('\n')
+        funds = []
+        for line in lines:
+            parts = line.strip().split(';')
+            if len(parts) == 6:
+                funds.append({
+                    'code': parts[0].strip(),
+                    'name': parts[3].strip(),
+                    'nav': parts[4].strip(),
+                    'date': parts[5].strip()
+                })
+        return funds
+    except Exception as e:
+        print(f"AMFI load error: {e}")
+        return []
+
+def search_fund(query, funds):
+    query_lower = query.lower()
+    words = query_lower.split()
+    
+    # Score each fund by how many words match
+    scored = []
+    for fund in funds:
+        name_lower = fund['name'].lower()
+        score = sum(1 for word in words if word in name_lower)
+        if score > 0:
+            scored.append((score, fund))
+    
+    # Sort by score descending
+    scored.sort(key=lambda x: x[0], reverse=True)
+    
+    # Prefer Growth plans
+    growth_first = [f for _, f in scored if 'growth' in f['name'].lower()]
+    others = [f for _, f in scored if 'growth' not in f['name'].lower()]
+    
+    return (growth_first + others)[:1]
+
+def get_fund_returns(scheme_code):
+    try:
+        url = f"https://api.mfapi.in/mf/{scheme_code}"
+        data = json.loads(urllib.request.urlopen(url).read())
+        nav_data = data['data']
+        
+        if len(nav_data) < 2:
+            return None
+        
+        current_nav = float(nav_data[0]['nav'])
+        
+        returns = {}
+        
+        # 1 month return
+        if len(nav_data) >= 30:
+            nav_1m = float(nav_data[29]['nav'])
+            returns['1m'] = round(((current_nav - nav_1m) / nav_1m) * 100, 2)
+        
+        # 6 month return
+        if len(nav_data) >= 180:
+            nav_6m = float(nav_data[179]['nav'])
+            returns['6m'] = round(((current_nav - nav_6m) / nav_6m) * 100, 2)
+        
+        # 1 year return
+        if len(nav_data) >= 365:
+            nav_1y = float(nav_data[364]['nav'])
+            returns['1y'] = round(((current_nav - nav_1y) / nav_1y) * 100, 2)
+        
+        # 3 year return
+        if len(nav_data) >= 1095:
+            nav_3y = float(nav_data[1094]['nav'])
+            returns['3y'] = round(((current_nav - nav_3y) / nav_3y) * 100, 2)
+        
+        return returns
+    except Exception as e:
+        print(f"Fund returns error: {e}")
+        return None
+
+def generate_fund_chart(scheme_code, fund_name):
+    try:
+        url = f"https://api.mfapi.in/mf/{scheme_code}"
+        data = json.loads(urllib.request.urlopen(url).read())
+        nav_data = data['data'][:365]  # Last 1 year
+        nav_data.reverse()  # Oldest first
+        
+        dates = [item['date'] for item in nav_data]
+        navs = [float(item['nav']) for item in nav_data]
+        
+        from datetime import datetime
+        date_objects = [datetime.strptime(d, '%d-%m-%Y') for d in dates]
+        
+        fig, ax = plt.subplots(figsize=(10, 5))
+        
+        start_nav = navs[0]
+        end_nav = navs[-1]
+        color = '#2ecc71' if end_nav >= start_nav else '#e74c3c'
+        
+        ax.plot(date_objects, navs, color=color, linewidth=2)
+        ax.fill_between(date_objects, navs, alpha=0.1, color=color)
+        
+        ax.set_title(f"{fund_name[:50]} - 1 Year NAV Chart", fontsize=12, fontweight='bold', pad=15)
+        ax.set_ylabel("NAV (INR)", fontsize=11)
+        ax.grid(True, alpha=0.3)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+        plt.xticks(rotation=45)
+        
+        ax.annotate(f'NAV: {end_nav:.2f}',
+                   xy=(date_objects[-1], end_nav),
+                   xytext=(-80, 15),
+                   textcoords='offset points',
+                   fontsize=10,
+                   fontweight='bold',
+                   color=color)
+        
+        plt.tight_layout()
+        buf = BytesIO()
+        plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+        buf.seek(0)
+        plt.close()
+        return buf
+    except Exception as e:
+        print(f"Fund chart error: {e}")
+        return None
+
+def analyze_mutual_fund(fund, returns, meta):
+    try:
+        returns_text = ""
+        if '1m' in returns:
+            returns_text += f"- 1 Month Return: {returns['1m']}%\n"
+        if '6m' in returns:
+            returns_text += f"- 6 Month Return: {returns['6m']}%\n"
+        if '1y' in returns:
+            returns_text += f"- 1 Year Return: {returns['1y']}%\n"
+        if '3y' in returns:
+            returns_text += f"- 3 Year Return: {returns['3y']}%\n"
+
+        prompt = f"""
+You are a mutual fund expert explaining funds to complete beginners in India.
+Explain everything in very simple language. No jargon.
+
+Fund Details:
+- Fund Name: {fund['name']}
+- Fund House: {meta.get('fund_house', 'N/A')}
+- Category: {meta.get('scheme_category', 'N/A')}
+- Type: {meta.get('scheme_type', 'N/A')}
+- Current NAV: {fund['nav']}
+- NAV Date: {fund['date']}
+{returns_text}
+
+Give analysis in this EXACT format:
+
+MUTUAL FUND ANALYSIS - {fund['name'][:50]}
+
+WHAT IS THIS FUND?
+(Explain in 1-2 lines what kind of fund this is and what it invests in. No jargon.)
+
+HOW HAS IT PERFORMED?
+(Explain the returns in simple words. Is 1 year return good or bad? Compare to FD rate of 7% as benchmark. Is this fund beating FD?)
+
+WHO SHOULD INVEST?
+(What kind of person is this fund good for? Beginner, experienced, risk-taker, safe investor?)
+
+RISK LEVEL:
+(LOW / MEDIUM / HIGH - based on fund category. Explain why in simple words.)
+
+FINAL VERDICT:
+(LOOKS GOOD / AVERAGE / NOT RECOMMENDED)
+(Then write 2-3 lines in simple Hinglish explaining the verdict for a beginner.)
+
+Rules:
+- No emojis
+- Simple language only
+- Compare returns to FD (7%) as a reference point beginners understand
+- Never say consult a financial advisor
+"""
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=800
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Fund analysis error: {e}")
+        return f"Analysis failed: {e}"
+
+def format_fund_headings(text):
+    headings = [
+        "MUTUAL FUND ANALYSIS",
+        "WHAT IS THIS FUND",
+        "HOW HAS IT PERFORMED",
+        "WHO SHOULD INVEST",
+        "RISK LEVEL",
+        "FINAL VERDICT",
+        "LOOKS GOOD",
+        "AVERAGE",
+        "NOT RECOMMENDED",
+    ]
+    lines = text.split('\n')
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        for heading in headings:
+            if heading in stripped.upper():
+                line = f"*{stripped}*"
+                break
+        new_lines.append(line)
+    return '\n'.join(new_lines)
+
+async def mf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.replace('/mf', '').strip()
+    
+    if not query:
+        await update.message.reply_text(
+            "Please send a fund name after /mf\n\nExamples:\n/mf Parag Parikh Flexi Cap\n/mf Mirae Asset Large Cap\n/mf SBI Small Cap\n/mf Axis Bluechip"
+        )
+        return
+    
+    await update.message.reply_text(f"Searching for {query}... please wait")
+    
+    funds = load_amfi_funds()
+    if not funds:
+        await update.message.reply_text("Could not load fund data. Try again later.")
+        return
+    
+    results = search_fund(query, funds)
+    if not results:
+        await update.message.reply_text(
+            f"No fund found for '{query}'.\n\nTry more specific names:\n/mf Parag Parikh Flexi Cap\n/mf Mirae Asset Large Cap\n/mf SBI Small Cap"
+        )
+        return
+    
+    fund = results[0]
+    await update.message.reply_text(f"Found: {fund['name']}\nFetching analysis...")
+    
+    # Get historical data
+    returns = get_fund_returns(fund['code'])
+    
+    # Get meta
+    try:
+        url = f"https://api.mfapi.in/mf/{fund['code']}"
+        meta_data = json.loads(urllib.request.urlopen(url).read())
+        meta = meta_data.get('meta', {})
+    except:
+        meta = {}
+    
+    # Generate chart
+    chart = generate_fund_chart(fund['code'], fund['name'])
+    if chart:
+        await update.message.reply_photo(photo=chart)
+    
+    # Generate analysis
+    analysis = analyze_mutual_fund(fund, returns or {}, meta)
+    formatted = format_fund_headings(analysis)
+    
+    try:
+        await update.message.reply_text(formatted, parse_mode='Markdown')
+    except Exception:
+        await update.message.reply_text(analysis)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     print(f"Received: {user_input}")
@@ -791,6 +1055,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/news TCS - latest news for any stock\n\n"
         "/start - Welcome message\n"
         "/help - This message"
+        "7. MUTUAL FUND ANALYSIS\n"
+        "/mf Parag Parikh Flexi Cap"
+        "/mf Mirae Asset Large Cap"
     )
 
 def main():
@@ -804,6 +1071,7 @@ def main():
     app.add_handler(CommandHandler("trending", trending_command))
     app.add_handler(CommandHandler("news", news_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CommandHandler("mf", mf_command))
 
     # Start scheduler inside the app's post_init
     async def post_init(application):
