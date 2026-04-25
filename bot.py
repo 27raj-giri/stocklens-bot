@@ -897,13 +897,21 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     current = get_user_language(chat_id)
     
+    async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    current = get_user_language(chat_id)
+    
     await update.message.reply_text(
         f"Current language: {current.upper()}\n\n"
-        "Choose your preferred language:\n\n"
-        "1. /lang_english - English\n"
-        "2. /lang_hinglish - Hinglish (default)\n"
-        "3. /lang_hindi - Hindi (Roman script)\n"
-        "4. /lang_marathi - Marathi (Roman script)"
+        "Choose your preferred language by sending the command:\n\n"
+        "/lang_english - English\n"
+        "Example: 'This company provides IT services globally.'\n\n"
+        "/lang_hinglish - Hinglish (default)\n"
+        "Example: 'Yeh stock accha hai because growth strong hai.'\n\n"
+        "/lang_hindi - Hindi\n"
+        "Example: 'Yeh company bahut acchi hai aur iski growth strong hai.'\n\n"
+        "/lang_marathi - Marathi\n"
+        "Example: 'Hi company khup changli aahe aur tichi growth strong aahe.'"
     )
 
 async def set_english(update: Update, context: ContextTypes.DEFAULT_TYPE):
