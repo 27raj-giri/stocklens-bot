@@ -547,6 +547,131 @@ async def my_subscriptions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text("Error fetching subscriptions.")
 
+# Nifty 50 stocks for trending
+NIFTY50 = [
+    "RELIANCE", "TCS", "HDFCBANK", "BHARTIARTL", "ICICIBANK",
+    "INFOSYS", "SBIN", "HINDUNILVR", "ITC", "KOTAKBANK",
+    "LT", "HCLTECH", "MARUTI", "AXISBANK", "TITAN",
+    "SUNPHARMA", "ULTRACEMCO", "NESTLEIND", "WIPRO", "NTPC",
+    "POWERGRID", "TATAMOTORS", "BAJFINANCE", "ASIANPAINT", "TECHM",
+    "ONGC", "TATASTEEL", "ADANIENT", "COALINDIA", "DIVISLAB"
+]
+
+def get_trending_stocks():
+    try:
+        movers = []
+        for symbol in NIFTY50:
+            try:
+                stock = yf.Ticker(symbol + ".NS")
+                hist = stock.history(period="2d")
+                if len(hist) < 2:
+                    continue
+                prev = hist['Close'].iloc[-2]
+                curr = hist['Close'].iloc[-1]
+                volume = hist['Volume'].iloc[-1]
+                change_pct = round(((curr - prev) / prev) * 100, 2)
+                movers.append({
+                    "symbol": symbol,
+                    "price": round(curr, 2),
+                    "change_pct": change_pct,
+                    "volume": volume
+                })
+            except:
+                continue
+        
+        if not movers:
+            return None
+        
+        # Sort by absolute % change
+        movers.sort(key=lambda x: abs(x['change_pct']), reverse=True)
+        return movers[:5]
+    except Exception as e:
+        print(f"Trending error: {e}")
+        return None
+
+def get_stock_news(symbol, company_name):
+    try:
+        stock = yf.Ticker(symbol + ".NS")
+        news = stock.news
+        
+        if not news:
+            return None
+        
+        articles = []
+        for item in news[:5]:
+            content = item.get('content', {})
+            title = content.get('title', '')
+            summary = content.get('summary', '')
+            source = content.get('provider', {}).get('displayName', '')
+            pub_date = content.get('pubDate', '')
+            
+            if title:
+                articles.append({
+                    "title": title,
+                    "summary": summary[:200] if summary else '',
+                    "source": source,
+                    "date": pub_date[:10] if pub_date else ''
+                })
+        
+        return articles if articles else None
+    except Exception as e:
+        print(f"News error: {e}")
+        return None
+
+async def trending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Fetching today's top movers... please wait")
+    
+    movers = get_trending_stocks()
+    
+    if not movers:
+        await update.message.reply_text("Could not fetch trending stocks right now. Try again later.")
+        return
+    
+    message = "TOP MOVERS TODAY\n\n"
+    for i, stock in enumerate(movers, 1):
+        direction = "up" if stock['change_pct'] >= 0 else "down"
+        sign = "+" if stock['change_pct'] >= 0 else ""
+        message += f"{i}. {stock['symbol']}\n"
+        message += f"   Price: {stock['price']} | {sign}{stock['change_pct']}% {direction}\n\n"
+    
+    message += "Send any stock name for full analysis."
+    await update.message.reply_text(message)
+
+async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = update.message.text.replace('/news', '').strip()
+    
+    if not args:
+        await update.message.reply_text(
+            "Please send a stock symbol after /news\n\nExample: /news TCS"
+        )
+        return
+    
+    await update.message.reply_text(f"Fetching news for {args}... please wait")
+    
+    data = get_stock_data(args)
+    if not data or data['price'] == 'N/A':
+        await update.message.reply_text("Stock not found. Please check the symbol.")
+        return
+    
+    articles = get_stock_news(data['symbol'], data['name'])
+    
+    if not articles:
+        await update.message.reply_text(f"No recent news found for {data['name']}.")
+        return
+    
+    message = f"LATEST NEWS: {data['name']}\n\n"
+    for i, article in enumerate(articles, 1):
+        message += f"{i}. {article['title']}\n"
+        if article['summary']:
+            message += f"{article['summary'][:150]}...\n"
+        if article['source']:
+            message += f"Source: {article['source']}"
+        if article['date']:
+            message += f" | {article['date']}"
+        message += "\n\n"
+    
+    await update.message.reply_text(message)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     print(f"Received: {user_input}")
@@ -660,6 +785,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/subscribe TCS RELIANCE\n"
         "/unsubscribe TCS\n"
         "/mysubs - see your subscriptions\n\n"
+        "5. TRENDING STOCKS\n"
+        "/trending - top movers today\n\n"
+        "6. STOCK NEWS\n"
+        "/news TCS - latest news for any stock\n\n"
         "/start - Welcome message\n"
         "/help - This message"
     )
@@ -672,6 +801,8 @@ def main():
     app.add_handler(CommandHandler("subscribe", subscribe))
     app.add_handler(CommandHandler("unsubscribe", unsubscribe))
     app.add_handler(CommandHandler("mysubs", my_subscriptions))
+    app.add_handler(CommandHandler("trending", trending_command))
+    app.add_handler(CommandHandler("news", news_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Start scheduler inside the app's post_init
