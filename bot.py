@@ -300,10 +300,140 @@ Rules:
         print(f"Groq error: {e}")
         return f"Analysis failed: {e}"
 
+def analyze_comparison(data1, data2):
+    try:
+        prompt = f"""
+You are a stock market expert comparing two Indian stocks for a complete beginner.
+Explain everything in simple language, no jargon.
+
+Stock 1: {data1['name']}
+- Price: {data1['price']}
+- PE Ratio: {data1['pe_ratio']}
+- Revenue Growth: {data1['revenue_growth']}
+- Profit Margins: {data1['profit_margins']}
+- Debt to Equity: {data1['debt_to_equity']}
+- Return on Equity: {data1['roe']}
+- 52 Week High: {data1['52w_high']}
+- 52 Week Low: {data1['52w_low']}
+
+Stock 2: {data2['name']}
+- Price: {data2['price']}
+- PE Ratio: {data2['pe_ratio']}
+- Revenue Growth: {data2['revenue_growth']}
+- Profit Margins: {data2['profit_margins']}
+- Debt to Equity: {data2['debt_to_equity']}
+- Return on Equity: {data2['roe']}
+- 52 Week High: {data2['52w_high']}
+- 52 Week Low: {data2['52w_low']}
+
+Give comparison in this EXACT format:
+
+STOCK COMPARISON: {data1['name']} vs {data2['name']}
+
+WHAT DO THESE COMPANIES DO?
+{data1['name']}: (1 line simple explanation)
+{data2['name']}: (1 line simple explanation)
+
+PRICE & VALUE:
+(Compare current prices and PE ratios in simple words. Which one is cheaper relative to its earnings?)
+
+GROWTH & PROFITABILITY:
+(Compare revenue growth and profit margins simply. Which one is growing faster and keeping more money?)
+
+RISK LEVEL:
+(Compare debt to equity. Which one has borrowed more money and is therefore riskier?)
+
+OVERALL WINNER:
+(Choose one stock as the better option right now and explain why in 2-3 lines in simple Hinglish)
+
+Rules:
+- No emojis
+- No jargon without explanation
+- Be decisive, pick a winner
+- Never say consult a financial advisor
+"""
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=800
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Comparison error: {e}")
+        return f"Comparison failed: {e}"
+
+def format_comparison_headings(text):
+    headings = [
+        "WHAT DO THESE COMPANIES DO",
+        "PRICE & VALUE",
+        "GROWTH & PROFITABILITY",
+        "RISK LEVEL",
+        "OVERALL WINNER",
+        "STOCK COMPARISON",
+    ]
+    lines = text.split('\n')
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        matched = False
+        for heading in headings:
+            if heading in stripped.upper():
+                line = f"*{stripped}*"
+                matched = True
+                break
+        new_lines.append(line)
+    return '\n'.join(new_lines)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     print(f"Received: {user_input}")
 
+    # Detect comparison mode
+    comparison_keywords = [' vs ', ' VS ', ' Vs ', ' versus ']
+    is_comparison = any(kw in user_input for kw in comparison_keywords)
+
+    if is_comparison:
+        # Split into two stocks
+        for kw in comparison_keywords:
+            if kw in user_input:
+                parts = user_input.split(kw)
+                break
+        
+        stock1 = parts[0].strip()
+        stock2 = parts[1].strip()
+
+        await update.message.reply_text(f"Comparing {stock1} vs {stock2}... please wait")
+
+        data1 = get_stock_data(stock1)
+        data2 = get_stock_data(stock2)
+
+        if not data1 or data1['price'] == 'N/A':
+            await update.message.reply_text(f"Could not find data for {stock1}. Please check the symbol.")
+            return
+        
+        if not data2 or data2['price'] == 'N/A':
+            await update.message.reply_text(f"Could not find data for {stock2}. Please check the symbol.")
+            return
+
+        # Generate comparison charts side by side
+        chart1 = generate_chart(data1['symbol'], data1['name'])
+        chart2 = generate_chart(data2['symbol'], data2['name'])
+
+        if chart1:
+            await update.message.reply_photo(photo=chart1, caption=data1['name'])
+        if chart2:
+            await update.message.reply_photo(photo=chart2, caption=data2['name'])
+
+        comparison = analyze_comparison(data1, data2)
+        formatted = format_comparison_headings(comparison)
+        
+        try:
+            await update.message.reply_text(formatted, parse_mode='Markdown')
+        except Exception:
+            await update.message.reply_text(comparison)
+        return
+
+    # Normal single stock analysis
     await update.message.reply_text(f"Analyzing {user_input}... please wait")
 
     data = get_stock_data(user_input)
@@ -314,14 +444,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Generate chart
     chart = generate_chart(data['symbol'], data['name'])
-    
-    # Send chart first
     if chart:
         await update.message.reply_photo(photo=chart)
-    
-    # Then send analysis
+
     analysis = analyze_stock(data)
     try:
         await update.message.reply_text(analysis, parse_mode='Markdown')
