@@ -143,27 +143,36 @@ def escape_markdown(text):
     return text
 
 def format_with_bold_headings(text):
+    lines = text.split('\n')
+    new_lines = []
+    
     headings = [
-        "WHAT DOES THIS COMPANY DO?",
-        "WHERE IS THE STOCK RIGHT NOW?",
-        "WHY THIS STOCK LOOKS GOOD:",
-        "WHAT COULD GO WRONG:",
-        "FINAL VERDICT:",
+        "WHAT DOES THIS COMPANY DO",
+        "WHERE IS THE STOCK RIGHT NOW",
+        "WHY THIS STOCK LOOKS GOOD",
+        "WHAT COULD GO WRONG",
+        "FINAL VERDICT",
         "LOOKS INTERESTING",
         "WAIT AND WATCH",
         "AVOID FOR NOW",
     ]
     
-    # Handle STOCK ANALYSIS line separately
-    lines = text.split('\n')
-    new_lines = []
     for line in lines:
-        if line.startswith("STOCK ANALYSIS"):
-            line = f"*STOCK ANALYSIS*{line[14:]}"
+        stripped = line.strip()
+        
+        # Handle STOCK ANALYSIS line
+        if stripped.upper().startswith("STOCK ANALYSIS"):
+            line = f"*STOCK ANALYSIS*{stripped[14:]}"
         else:
+            # Check if line contains any heading (case insensitive)
+            matched = False
             for heading in headings:
-                if heading in line:
-                    line = line.replace(heading, f"*{heading}*")
+                if heading in stripped.upper():
+                    # Replace preserving original case but wrapping in bold
+                    line = f"*{stripped}*"
+                    matched = True
+                    break
+        
         new_lines.append(line)
     
     return '\n'.join(new_lines)
