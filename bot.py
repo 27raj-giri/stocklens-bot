@@ -144,7 +144,6 @@ def escape_markdown(text):
 
 def format_with_bold_headings(text):
     headings = [
-        "STOCK ANALYSIS",
         "WHAT DOES THIS COMPANY DO?",
         "WHERE IS THE STOCK RIGHT NOW?",
         "WHY THIS STOCK LOOKS GOOD:",
@@ -154,9 +153,20 @@ def format_with_bold_headings(text):
         "WAIT AND WATCH",
         "AVOID FOR NOW",
     ]
-    for heading in headings:
-        text = text.replace(heading, f"*{heading}*")
-    return text
+    
+    # Handle STOCK ANALYSIS line separately
+    lines = text.split('\n')
+    new_lines = []
+    for line in lines:
+        if line.startswith("STOCK ANALYSIS"):
+            line = f"*STOCK ANALYSIS*{line[14:]}"
+        else:
+            for heading in headings:
+                if heading in line:
+                    line = line.replace(heading, f"*{heading}*")
+        new_lines.append(line)
+    
+    return '\n'.join(new_lines)
 
 def generate_chart(symbol, company_name):
     try:
