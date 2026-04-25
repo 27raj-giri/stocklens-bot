@@ -590,7 +590,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "How to use StockLens:\n\n1. Send any stock name or NSE symbol\n2. Wait 10-15 seconds\n3. Get full AI analysis\n\nExamples:\nTCS\nInfosys\nTata Motors\nHDFC Bank\nReliance\n\n/start - Welcome message\n/help - This message"
+        "How to use StockLens:\n\n"
+        "1. SINGLE STOCK ANALYSIS\n"
+        "Send any stock name or symbol\n"
+        "Example: TCS or Tata Motors\n\n"
+        "2. STOCK COMPARISON\n"
+        "Send two stocks with vs between them\n"
+        "Example: TCS vs INFY\n\n"
+        "3. PORTFOLIO ANALYSIS\n"
+        "Send multiple stocks separated by commas\n"
+        "Example: TCS, INFY, HDFCBANK, RELIANCE\n\n"
+        "/start - Welcome message\n"
+        "/help - This message"
     )
 
 def main():
