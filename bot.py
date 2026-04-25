@@ -13,36 +13,36 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 def resolve_symbol(user_input):
-    # Try exact input as symbol first
     cleaned = user_input.strip().upper().replace(" ", "")
     
-    # Direct attempts
-    for attempt in [cleaned, cleaned.replace("&", "AND")]:
+    # List of suffixes to try
+    attempts = [
+        cleaned,           # ZOMATO
+        cleaned + "LTD",   # ZOMATOLTD  
+        cleaned[:-3] if len(cleaned) > 3 else cleaned,  # trim last 3
+    ]
+    
+    for attempt in attempts:
         try:
             test = yf.Ticker(attempt + ".NS")
             info = test.info
-            if info.get("currentPrice") or info.get("regularMarketPrice"):
-                print(f"Direct match: {attempt}")
+            if info.get("currentPrice"):
+                print(f"Found: {attempt}")
                 return attempt
         except:
             continue
     
-    # Search fallback
+    # Try yfinance search as fallback
     try:
-        import urllib.request
-        import json
-        query = user_input.strip().replace(" ", "+")
-        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&region=IN&lang=en-IN"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        response = urllib.request.urlopen(req, timeout=5)
-        data = json.loads(response.read())
-        quotes = data.get("quotes", [])
-        for quote in quotes:
-            symbol = quote.get("symbol", "")
-            if symbol.endswith(".NS"):
-                result = symbol.replace(".NS", "")
-                print(f"Yahoo search found: {result}")
-                return result
+        search_results = yf.Search(user_input, max_results=10)
+        quotes = search_results.quotes
+        if quotes:
+            for quote in quotes:
+                symbol = quote.get("symbol", "")
+                if ".NS" in symbol:
+                    symbol = symbol.replace(".NS", "")
+                    print(f"Search found: {symbol}")
+                    return symbol
     except Exception as e:
         print(f"Search error: {e}")
     
@@ -67,6 +67,7 @@ def get_stock_data(user_input):
             "debt_to_equity": info.get("debtToEquity", "N/A"),
             "roe": info.get("returnOnEquity", "N/A"),
             "sector": info.get("sector", "N/A"),
+            "industry": info.get("industry", "N/A"),
             "summary": info.get("longBusinessSummary", "N/A")
         }
         print(f"Data fetched: {data['name']} at {data['price']}")
@@ -74,9 +75,67 @@ def get_stock_data(user_input):
     except Exception as e:
         print(f"Error fetching data: {e}")
         return None
+# Sector peer mapping
+SECTOR_PEERS = {
+    "Information Technology Services": ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS"],
+    "Banks": ["HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "AXISBANK.NS", "SBIN.NS"],
+    "Software": ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS"],
+    "Oil & Gas": ["RELIANCE.NS", "ONGC.NS", "BPCL.NS", "IOC.NS"],
+    "Automobiles": ["TATAMOTORS.NS", "MARUTI.NS", "BAJAJ-AUTO.NS", "HEROMOTOCO.NS", "EICHERMOT.NS"],
+    "Pharmaceuticals": ["SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS"],
+    "Cement": ["ULTRACEMCO.NS", "GRASIM.NS", "AMBUJACEM.NS", "ACC.NS"],
+    "FMCG": ["HINDUNILVR.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS"],
+    "Telecom": ["BHARTIARTL.NS", "IDEA.NS"],
+    "Steel": ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS"],
+    "Power": ["NTPC.NS", "POWERGRID.NS", "ADANIGREEN.NS"],
+    "Insurance": ["HDFCLIFE.NS", "SBILIFE.NS", "ICICIlombard.NS"],
+    "Consumer Cyclical": ["TATAMOTORS.NS", "MARUTI.NS", "TITAN.NS", "ASIANPAINT.NS"],
+}
 
+def get_sector_context(industry, current_pe, current_symbol):
+    try:
+        peers = SECTOR_PEERS.get(industry, [])
+        if not peers:
+            return None
+        
+        pe_values = []
+        for peer in peers:
+            if peer.replace(".NS", "") == current_symbol:
+                continue
+            try:
+                info = yf.Ticker(peer).info
+                pe = info.get("trailingPE", 0)
+                if pe and pe > 0:
+                    pe_values.append(pe)
+            except:
+                continue
+        
+        if not pe_values:
+            return None
+        
+        avg_pe = round(sum(pe_values) / len(pe_values), 2)
+        
+        if current_pe == "N/A" or not current_pe:
+            return f"Sector average PE is {avg_pe}."
+        
+        if current_pe < avg_pe:
+            comparison = f"cheaper than sector average"
+        elif current_pe > avg_pe:
+            comparison = f"more expensive than sector average"
+        else:
+            comparison = f"in line with sector average"
+        
+        return f"Sector average PE is {avg_pe}. This stock is {comparison} (stock PE: {current_pe}, sector avg: {avg_pe})."
+    
+    except Exception as e:
+        print(f"Sector context error: {e}")
+        return None
+    
 def analyze_stock(data):
     try:
+        sector_info = get_sector_context(data['industry'], data['pe_ratio'], data['symbol'])
+        sector_line = f"- Sector Context: {sector_info}" if sector_info else ""
+        
         prompt = f"""
 You are a stock market expert who explains stocks to complete beginners in India.
 Your job is to make complex financial data easy to understand for someone who has never studied finance.
@@ -93,6 +152,7 @@ Here is the stock data:
 - Debt to Equity: {data['debt_to_equity']}
 - Return on Equity: {data['roe']}
 - Sector: {data['sector']}
+{sector_line}
 - Business: {data['summary'][:300]}
 
 Give analysis in this EXACT format:
@@ -103,7 +163,7 @@ WHAT DOES THIS COMPANY DO?
 (Explain in 1-2 lines like you are telling a friend. No jargon.)
 
 WHERE IS THE STOCK RIGHT NOW?
-(Explain current price vs 52 week high and low in simple words. Example: "Stock is near its lowest point this year" or "Stock is close to its peak". Also explain if it is cheap or expensive based on PE ratio in simple words.)
+(Explain current price vs 52 week high and low in simple words. Also explain if it is cheap or expensive compared to its sector peers using the sector context data provided.)
 
 WHY THIS STOCK LOOKS GOOD:
 - (Point 1 in very simple language, explain what the number means, not just the number)
@@ -126,6 +186,7 @@ Rules:
 - No emojis
 - Never say consult a financial advisor
 """
+        
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
