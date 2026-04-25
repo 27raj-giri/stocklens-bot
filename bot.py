@@ -334,7 +334,7 @@ Rules:
 - Never say consult a financial advisor
 - Always leave a blank line between verdict word and explanation
 """
-        model_to_use = "gemma2-9b-it" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
+        model_to_use = "llama-3.1-8b-instant" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
         response = groq_client.chat.completions.create(
             model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
@@ -394,7 +394,7 @@ Rules:
 - Be decisive, pick a winner
 - Never say consult a financial advisor
 """
-        model_to_use = "gemma2-9b-it" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
+        model_to_use = "llama-3.1-8b-instant" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
         response = groq_client.chat.completions.create(
             model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
@@ -458,7 +458,7 @@ Rules:
 - Be decisive
 - Never say consult a financial advisor
 """
-        model_to_use = "gemma2-9b-it" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
+        model_to_use = "llama-3.1-8b-instant" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
         response = groq_client.chat.completions.create(
             model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
@@ -522,7 +522,7 @@ Rules:
 - Compare returns to FD 7% as reference
 - Never say consult a financial advisor
 """
-        model_to_use = "gemma2-9b-it" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
+        model_to_use = "llama-3.1-8b-instant" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
         response = groq_client.chat.completions.create(
             model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
