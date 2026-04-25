@@ -674,19 +674,23 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    
-    # Add scheduler for 9am IST daily brief
-    scheduler = AsyncIOScheduler(timezone=pytz.timezone('Asia/Kolkata'))
-    scheduler.add_job(send_morning_briefs, 'cron', hour=9, minute=0, args=[app])
-    scheduler.start()
-    
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("subscribe", subscribe))
     app.add_handler(CommandHandler("unsubscribe", unsubscribe))
     app.add_handler(CommandHandler("mysubs", my_subscriptions))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
+
+    # Start scheduler inside the app's post_init
+    async def post_init(application):
+        scheduler = AsyncIOScheduler(timezone=pytz.timezone('Asia/Kolkata'))
+        scheduler.add_job(send_morning_briefs, 'cron', hour=9, minute=0, args=[application])
+        scheduler.start()
+        print("Scheduler started")
+
+    app.post_init = post_init
+
     print("Bot is running...")
     app.run_polling()
 
