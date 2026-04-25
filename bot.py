@@ -27,32 +27,9 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def resolve_symbol(user_input):
     cleaned = user_input.strip().upper().replace(" ", "")
-    attempts = [
-        cleaned,
-        cleaned + "LTD",
-        cleaned[:-3] if len(cleaned) > 3 else cleaned,
-    ]
-    for attempt in attempts:
-        try:
-            test = yf.Ticker(attempt + ".NS")
-            info = test.info
-            if info.get("currentPrice"):
-                print(f"Found: {attempt}")
-                return attempt
-        except:
-            continue
-    try:
-        search_results = yf.Search(user_input, max_results=10)
-        quotes = search_results.quotes
-        if quotes:
-            for quote in quotes:
-                symbol = quote.get("symbol", "")
-                if ".NS" in symbol:
-                    symbol = symbol.replace(".NS", "")
-                    print(f"Search found: {symbol}")
-                    return symbol
-    except Exception as e:
-        print(f"Search error: {e}")
+    
+    # Just return the cleaned symbol directly
+    # We'll validate in get_stock_data using history instead
     return cleaned
 
 def get_stock_data(user_input):
@@ -60,10 +37,21 @@ def get_stock_data(user_input):
         resolved = resolve_symbol(user_input)
         stock = yf.Ticker(resolved + ".NS")
         info = stock.info
+        
+        # Use regularMarketPrice or currentPrice or fall back to history
+        price = info.get("currentPrice") or info.get("regularMarketPrice")
+        
+        if not price:
+            hist = stock.history(period="1d")
+            if hist.empty:
+                print(f"No price data for {resolved}")
+                return None
+            price = round(hist['Close'].iloc[-1], 2)
+
         data = {
             "symbol": resolved,
             "name": info.get("longName", resolved),
-            "price": info.get("currentPrice", "N/A"),
+            "price": price,
             "pe_ratio": round(info.get("trailingPE", 0), 2) if info.get("trailingPE") else "N/A",
             "52w_high": info.get("fiftyTwoWeekHigh", "N/A"),
             "52w_low": info.get("fiftyTwoWeekLow", "N/A"),
@@ -79,7 +67,7 @@ def get_stock_data(user_input):
         print(f"Data fetched: {data['name']} at {data['price']}")
         return data
     except Exception as e:
-        print(f"Error fetching data: {e}")
+        print(f"Error fetching data for {user_input}: {e}")
         return None
 
 def get_morning_brief_data(symbol):
