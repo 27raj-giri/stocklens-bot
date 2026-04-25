@@ -255,7 +255,7 @@ def format_portfolio_headings(text):
         new_lines.append(line)
     return '\n'.join(new_lines)
 
-def analyze_stock(data):
+def analyze_stock(data, language='hinglish'):
     try:
         sector_info = get_sector_context(data['industry'], data['pe_ratio'], data['symbol'])
         sector_line = f"- Sector Context: {sector_info}" if sector_info else ""
@@ -309,7 +309,8 @@ Rules:
 - Be decisive, give a clear opinion
 - No emojis
 - Never say consult a financial advisor
-- Always leave a blank line between the verdict word and the Hinglish explanation
+- Always leave a blank line between the verdict word and the explanation
+- {get_language_prompt(language)}
 """
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -323,7 +324,7 @@ Rules:
         print(f"Groq error: {e}")
         return f"Analysis failed: {e}"
 
-def analyze_comparison(data1, data2):
+def analyze_comparison(data1, data2, language='hinglish'):
     try:
         prompt = f"""
 You are a stock market expert comparing two Indian stocks for a complete beginner.
@@ -359,13 +360,14 @@ RISK LEVEL:
 (Compare debt. Which one has borrowed more and is riskier?)
 
 OVERALL WINNER:
-(Pick one stock. Explain why in 2-3 lines in simple Hinglish.)
+(Pick one stock. Explain why in 2-3 lines.)
 
 Rules:
 - No emojis
 - Simple language only
 - Be decisive, pick a winner
 - Never say consult a financial advisor
+- {get_language_prompt(language)}
 """
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -377,7 +379,7 @@ Rules:
         print(f"Comparison error: {e}")
         return f"Comparison failed: {e}"
 
-def analyze_portfolio(stocks_data):
+def analyze_portfolio(stocks_data, language='hinglish'):
     try:
         stocks_summary = ""
         for d in stocks_data:
@@ -420,13 +422,14 @@ WEAKEST STOCK:
 
 OVERALL PORTFOLIO HEALTH:
 (Rate as STRONG / MODERATE / NEEDS ATTENTION)
-(Explain in 3-4 lines in simple Hinglish.)
+(Explain in 3-4 lines.)
 
 Rules:
 - No emojis
 - Simple language only
 - Be decisive
 - Never say consult a financial advisor
+- {get_language_prompt(language)}
 """
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -801,7 +804,7 @@ def generate_fund_chart(scheme_code, fund_name):
         print(f"Fund chart error: {e}")
         return None
 
-def analyze_mutual_fund(fund, returns, meta):
+def analyze_mutual_fund(fund, returns, meta, language='hinglish'):
     try:
         returns_text = ""
         if '1m' in returns:
@@ -834,23 +837,24 @@ WHAT IS THIS FUND?
 (Explain in 1-2 lines what kind of fund this is and what it invests in. No jargon.)
 
 HOW HAS IT PERFORMED?
-(Explain the returns in simple words. Is 1 year return good or bad? Compare to FD rate of 7% as benchmark. Is this fund beating FD?)
+(Explain the returns in simple words. Is 1 year return good or bad? Compare to FD rate of 7% as benchmark.)
 
 WHO SHOULD INVEST?
-(What kind of person is this fund good for? Beginner, experienced, risk-taker, safe investor?)
+(What kind of person is this fund good for?)
 
 RISK LEVEL:
-(LOW / MEDIUM / HIGH - based on fund category. Explain why in simple words.)
+(LOW / MEDIUM / HIGH - explain why simply.)
 
 FINAL VERDICT:
 (LOOKS GOOD / AVERAGE / NOT RECOMMENDED)
-(Then write 2-3 lines in simple Hinglish explaining the verdict for a beginner.)
+(Then write 2-3 lines explaining the verdict.)
 
 Rules:
 - No emojis
 - Simple language only
-- Compare returns to FD (7%) as a reference point beginners understand
+- Compare returns to FD 7% as reference
 - Never say consult a financial advisor
+- {get_language_prompt(language)}
 """
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -884,6 +888,35 @@ def format_fund_headings(text):
                 break
         new_lines.append(line)
     return '\n'.join(new_lines)
+
+async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    current = get_user_language(chat_id)
+    
+    await update.message.reply_text(
+        f"Current language: {current.upper()}\n\n"
+        "Choose your preferred language:\n\n"
+        "1. /lang_english - English\n"
+        "2. /lang_hinglish - Hinglish (default)\n"
+        "3. /lang_hindi - Hindi (Roman script)\n"
+        "4. /lang_marathi - Marathi (Roman script)"
+    )
+
+async def set_english(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    set_user_language(update.message.chat_id, 'english')
+    await update.message.reply_text("Language set to English. All analysis will now be in English.")
+
+async def set_hinglish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    set_user_language(update.message.chat_id, 'hinglish')
+    await update.message.reply_text("Language set to Hinglish. Bilkul sahi choice hai!")
+
+async def set_hindi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    set_user_language(update.message.chat_id, 'hindi')
+    await update.message.reply_text("Language Hindi set ho gayi. Ab sab analysis Hindi mein aayega.")
+
+async def set_marathi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    set_user_language(update.message.chat_id, 'marathi')
+    await update.message.reply_text("Bhasha Marathi set zali. Aata sagli analysis Marathi madhe yeil.")
 
 async def mf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.replace('/mf', '').strip()
@@ -928,13 +961,44 @@ async def mf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_photo(photo=chart)
     
     # Generate analysis
-    analysis = analyze_mutual_fund(fund, returns or {}, meta)
+    language = get_user_language(update.message.chat_id)
+    analysis = analyze_mutual_fund(fund, returns or {}, meta, language)
     formatted = format_fund_headings(analysis)
     
     try:
         await update.message.reply_text(formatted, parse_mode='Markdown')
     except Exception:
         await update.message.reply_text(analysis)
+
+def get_user_language(chat_id):
+    try:
+        result = supabase.table("user_preferences").select("language").eq("chat_id", chat_id).execute()
+        if result.data:
+            return result.data[0]['language']
+        return 'hinglish'  # default
+    except:
+        return 'hinglish'
+
+def set_user_language(chat_id, language):
+    try:
+        supabase.table("user_preferences").upsert({
+            "chat_id": chat_id,
+            "language": language,
+            "updated_at": "now()"
+        }).execute()
+        return True
+    except Exception as e:
+        print(f"Language set error: {e}")
+        return False
+
+def get_language_prompt(language):
+    prompts = {
+        'english': "Respond in clear, simple English only.",
+        'hinglish': "Respond in Hinglish - mix of simple Hindi and English. Write English words in English script and Hindi words in English script. Example: 'Yeh stock accha hai because company ki growth strong hai.'",
+        'hindi': "Respond completely in Hindi language but use English script (Roman letters), not Devanagari. Example: 'Yeh company bahut acchi hai aur iska future bright dikh raha hai.'",
+        'marathi': "Respond completely in Marathi language but use English script (Roman letters), not Devanagari. Example: 'Hi company khup changli aahe aur tichi growth strong aahe.'"
+    }
+    return prompts.get(language, prompts['hinglish'])
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
