@@ -301,7 +301,7 @@ WHAT COULD GO WRONG:
 FINAL VERDICT:
 LOOKS INTERESTING
 
-(Then write 2-3 lines explaining the verdict in simple Hinglish that a beginner will understand. This explanation must be on a new line after a blank line.)
+(Then write 2-3 lines explaining the verdict in simple language that a beginner will understand. This explanation must be on a new line after a blank line.)
 
 Rules:
 - Never use financial jargon without explaining it
