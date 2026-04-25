@@ -897,10 +897,6 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     current = get_user_language(chat_id)
     
-    async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.message.chat_id
-    current = get_user_language(chat_id)
-    
     await update.message.reply_text(
         f"Current language: {current.upper()}\n\n"
         "Choose your preferred language by sending the command:\n\n"
