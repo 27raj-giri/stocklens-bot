@@ -995,8 +995,8 @@ def get_language_prompt(language):
     prompts = {
         'english': "IMPORTANT: Write the ENTIRE response in simple English only. No Hindi or regional language words at all.",
         'hinglish': "IMPORTANT: Write in Hinglish - naturally mix Hindi and English words together. Hindi words in Roman script. Example: 'Yeh stock accha hai because company ki growth strong hai aur profit margins bhi achhe hain.'",
-        'hindi': "IMPORTANT: Write the ENTIRE response in pure Hindi using Roman script (English letters). Every single word must be Hindi. Do not use any English words except for proper nouns like company names, numbers, and financial terms like PE, NAV, ROE. Example: 'Yeh company bahut acchi tarah se kaam karti hai. Iski amdani mein lagatar badhottari ho rahi hai. Niveeshkon ke liye yeh ek acha vikalp ho sakta hai.'",
-        'marathi': "IMPORTANT: Write the ENTIRE response in pure Marathi using Roman script (English letters). Every single word must be Marathi. Do not use any English words except for proper nouns like company names, numbers, and financial terms like PE, NAV, ROE. Example: 'Hi company khup changli aahe. Tiche utpanna satat vadhत aahe. Guntavnukdarsanchi hi ek changli nidhi aahe.'"
+        'hindi': "IMPORTANT: Write the ENTIRE response in pure Hindi using Devanagari script (हिंदी में लिखें). Every single word must be in Hindi Devanagari script. Only keep company names, numbers, and financial terms like PE, NAV, ROE in English. Example: 'यह कंपनी बहुत अच्छी तरह से काम करती है। इसकी आमदनी में लगातार बढ़ोतरी हो रही है। निवेशकों के लिए यह एक अच्छा विकल्प हो सकता है।'",
+        'marathi': "IMPORTANT: Write the ENTIRE response in pure Marathi using Devanagari script (मराठीत लिहा). Every single word must be in Marathi Devanagari script. Only keep company names, numbers, and financial terms like PE, NAV, ROE in English. Example: 'ही कंपनी खूप चांगली आहे. तिचे उत्पन्न सतत वाढत आहे. गुंतवणूकदारांसाठी हा एक चांगला पर्याय असू शकतो.'"
     }
     return prompts.get(language, prompts['hinglish'])
 
