@@ -13,36 +13,40 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 def resolve_symbol(user_input):
-    cleaned = user_input.strip()
+    cleaned = user_input.strip().upper().replace(" ", "")
     
-    # First try as direct NSE symbol
-    test = yf.Ticker(cleaned.upper() + ".NS")
-    info = test.info
-    if info.get("currentPrice"):
-        print(f"Direct symbol match: {cleaned.upper()}")
-        return cleaned.upper()
+    # List of suffixes to try
+    attempts = [
+        cleaned,           # ZOMATO
+        cleaned + "LTD",   # ZOMATOLTD  
+        cleaned[:-3] if len(cleaned) > 3 else cleaned,  # trim last 3
+    ]
     
-    # If not found, search by name
+    for attempt in attempts:
+        try:
+            test = yf.Ticker(attempt + ".NS")
+            info = test.info
+            if info.get("currentPrice"):
+                print(f"Found: {attempt}")
+                return attempt
+        except:
+            continue
+    
+    # Try yfinance search as fallback
     try:
-        search_results = yf.Search(cleaned, max_results=5)
+        search_results = yf.Search(user_input, max_results=10)
         quotes = search_results.quotes
         if quotes:
             for quote in quotes:
                 symbol = quote.get("symbol", "")
-                exchange = quote.get("exchange", "")
-                # Prefer NSE stocks
-                if symbol.endswith(".NS") or exchange in ["NSI", "NSE"]:
-                    symbol = symbol.replace(".NS", "").replace(".BO", "")
-                    print(f"Found via search: {symbol}")
+                if ".NS" in symbol:
+                    symbol = symbol.replace(".NS", "")
+                    print(f"Search found: {symbol}")
                     return symbol
-            # If no NSE match, take first result
-            symbol = quotes[0].get("symbol", cleaned.upper())
-            symbol = symbol.replace(".NS", "").replace(".BO", "")
-            return symbol
     except Exception as e:
         print(f"Search error: {e}")
     
-    return cleaned.upper()
+    return cleaned
 
 def get_stock_data(user_input):
     try:
