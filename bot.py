@@ -1139,15 +1139,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("subscribe", subscribe))
-    app.add_handler(CommandHandler("unsubscribe", unsubscribe))
-    app.add_handler(CommandHandler("mysubs", my_subscriptions))
     app.add_handler(CommandHandler("trending", trending_command))
     app.add_handler(CommandHandler("news", news_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CommandHandler("mf", mf_command))
+    app.add_handler(CommandHandler("lang_english", set_english))
+    app.add_handler(CommandHandler("lang_hinglish", set_hinglish))
+    app.add_handler(CommandHandler("lang_hindi", set_hindi))
+    app.add_handler(CommandHandler("lang_marathi", set_marathi))
+    app.add_handler(CommandHandler("language", language_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Start scheduler inside the app's post_init
     async def post_init(application):
