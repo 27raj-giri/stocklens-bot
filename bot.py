@@ -989,11 +989,12 @@ def get_user_language(chat_id):
 
 def set_user_language(chat_id, language):
     try:
-        supabase.table("user_preferences").upsert({
+        result = supabase.table("user_preferences").upsert({
             "chat_id": chat_id,
             "language": language,
             "updated_at": "now()"
         }).execute()
+        print(f"Language saved: {language} for {chat_id}, result: {result}")
         return True
     except Exception as e:
         print(f"Language set error: {e}")
@@ -1011,7 +1012,7 @@ def get_language_prompt(language):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     language = get_user_language(update.message.chat_id)
     print(f"User language: {language} for chat_id: {update.message.chat_id}")
-    
+
     user_input = update.message.text.strip()
     print(f"Received: {user_input}")
 
