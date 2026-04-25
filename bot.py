@@ -13,36 +13,36 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 def resolve_symbol(user_input):
+    # Try exact input as symbol first
     cleaned = user_input.strip().upper().replace(" ", "")
     
-    # List of suffixes to try
-    attempts = [
-        cleaned,           # ZOMATO
-        cleaned + "LTD",   # ZOMATOLTD  
-        cleaned[:-3] if len(cleaned) > 3 else cleaned,  # trim last 3
-    ]
-    
-    for attempt in attempts:
+    # Direct attempts
+    for attempt in [cleaned, cleaned.replace("&", "AND")]:
         try:
             test = yf.Ticker(attempt + ".NS")
             info = test.info
-            if info.get("currentPrice"):
-                print(f"Found: {attempt}")
+            if info.get("currentPrice") or info.get("regularMarketPrice"):
+                print(f"Direct match: {attempt}")
                 return attempt
         except:
             continue
     
-    # Try yfinance search as fallback
+    # Search fallback
     try:
-        search_results = yf.Search(user_input, max_results=10)
-        quotes = search_results.quotes
-        if quotes:
-            for quote in quotes:
-                symbol = quote.get("symbol", "")
-                if ".NS" in symbol:
-                    symbol = symbol.replace(".NS", "")
-                    print(f"Search found: {symbol}")
-                    return symbol
+        import urllib.request
+        import json
+        query = user_input.strip().replace(" ", "+")
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&region=IN&lang=en-IN"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        response = urllib.request.urlopen(req, timeout=5)
+        data = json.loads(response.read())
+        quotes = data.get("quotes", [])
+        for quote in quotes:
+            symbol = quote.get("symbol", "")
+            if symbol.endswith(".NS"):
+                result = symbol.replace(".NS", "")
+                print(f"Yahoo search found: {result}")
+                return result
     except Exception as e:
         print(f"Search error: {e}")
     
