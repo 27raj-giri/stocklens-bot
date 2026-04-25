@@ -384,10 +384,139 @@ def format_comparison_headings(text):
         new_lines.append(line)
     return '\n'.join(new_lines)
 
+def analyze_portfolio(stocks_data):
+    try:
+        # Build portfolio summary for prompt
+        stocks_summary = ""
+        for d in stocks_data:
+            stocks_summary += f"""
+- {d['name']} ({d['symbol']}):
+  Price: {d['price']}, PE: {d['pe_ratio']}, Sector: {d['sector']}
+  Revenue Growth: {d['revenue_growth']}, Profit Margins: {d['profit_margins']}
+  Debt to Equity: {d['debt_to_equity']}, ROE: {d['roe']}
+"""
+
+        # Sector concentration
+        sectors = [d['sector'] for d in stocks_data if d['sector'] != 'N/A']
+        sector_counts = {}
+        for s in sectors:
+            sector_counts[s] = sector_counts.get(s, 0) + 1
+        
+        sector_summary = ", ".join([f"{k}: {v} stock(s)" for k, v in sector_counts.items()])
+
+        prompt = f"""
+You are a stock market expert reviewing a beginner investor's portfolio in India.
+Explain everything in very simple language. No jargon.
+
+The investor holds these stocks:
+{stocks_summary}
+
+Sector breakdown: {sector_summary}
+
+Give portfolio analysis in this EXACT format:
+
+PORTFOLIO ANALYSIS
+
+WHAT YOU OWN:
+(List each stock in 1 line - what the company does in simplest words)
+
+SECTOR CONCENTRATION:
+(Are they too focused in one sector? Explain why diversification matters in simple words. Use the sector breakdown data.)
+
+STRONGEST STOCK:
+(Which one stock looks best based on growth, margins and debt. Say why in simple words.)
+
+WEAKEST STOCK:
+(Which one stock looks worst or riskiest. Say why in simple words.)
+
+OVERALL PORTFOLIO HEALTH:
+(Rate as STRONG / MODERATE / NEEDS ATTENTION)
+(Then explain in 3-4 lines in simple Hinglish - is this a good portfolio for a beginner? What should they watch out for?)
+
+Rules:
+- No emojis
+- Simple language only
+- Be decisive
+- Never say consult a financial advisor
+"""
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=900
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Portfolio error: {e}")
+        return f"Portfolio analysis failed: {e}"
+
+def format_portfolio_headings(text):
+    headings = [
+        "PORTFOLIO ANALYSIS",
+        "WHAT YOU OWN",
+        "SECTOR CONCENTRATION",
+        "STRONGEST STOCK",
+        "WEAKEST STOCK",
+        "OVERALL PORTFOLIO HEALTH",
+        "STRONG",
+        "MODERATE",
+        "NEEDS ATTENTION",
+    ]
+    lines = text.split('\n')
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        for heading in headings:
+            if stripped.upper() == heading or stripped.upper().startswith(heading + ":"):
+                line = f"*{stripped}*"
+                break
+        new_lines.append(line)
+    return '\n'.join(new_lines)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text.strip()
     print(f"Received: {user_input}")
 
+    # Detect portfolio mode - comma separated stocks
+    is_portfolio = ',' in user_input and ' vs ' not in user_input.lower()
+    
+    if is_portfolio:
+        symbols = [s.strip() for s in user_input.split(',')]
+        
+        if len(symbols) < 2:
+            await update.message.reply_text("Please send at least 2 stocks separated by commas.\n\nExample: TCS, INFY, HDFCBANK")
+            return
+        
+        if len(symbols) > 6:
+            await update.message.reply_text("Maximum 6 stocks at a time for portfolio analysis.")
+            return
+
+        await update.message.reply_text(f"Analyzing your portfolio of {len(symbols)} stocks... please wait")
+
+        stocks_data = []
+        failed = []
+        for symbol in symbols:
+            data = get_stock_data(symbol)
+            if data and data['price'] != 'N/A':
+                stocks_data.append(data)
+            else:
+                failed.append(symbol)
+
+        if len(stocks_data) < 2:
+            await update.message.reply_text("Could not fetch data for enough stocks. Please check the symbols and try again.")
+            return
+
+        if failed:
+            await update.message.reply_text(f"Could not find: {', '.join(failed)}. Analyzing the rest.")
+
+        analysis = analyze_portfolio(stocks_data)
+        formatted = format_portfolio_headings(analysis)
+
+        try:
+            await update.message.reply_text(formatted, parse_mode='Markdown')
+        except Exception:
+            await update.message.reply_text(analysis)
+        return
+    
     # Detect comparison mode
     comparison_keywords = [' vs ', ' VS ', ' Vs ', ' versus ']
     is_comparison = any(kw in user_input for kw in comparison_keywords)
