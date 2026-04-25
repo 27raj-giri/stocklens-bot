@@ -1,3 +1,8 @@
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from io import BytesIO
 import os
 import re
 import yfinance as yf
@@ -153,6 +158,59 @@ def format_with_bold_headings(text):
         text = text.replace(heading, f"*{heading}*")
     return text
 
+def generate_chart(symbol, company_name):
+    try:
+        stock = yf.Ticker(symbol + ".NS")
+        hist = stock.history(period="6mo")
+        
+        if hist.empty:
+            return None
+        
+        fig, ax = plt.subplots(figsize=(10, 5))
+        
+        # Color line green if price went up, red if down
+        start_price = hist['Close'].iloc[0]
+        end_price = hist['Close'].iloc[-1]
+        color = '#2ecc71' if end_price >= start_price else '#e74c3c'
+        
+        ax.plot(hist.index, hist['Close'], color=color, linewidth=2)
+        ax.fill_between(hist.index, hist['Close'], alpha=0.1, color=color)
+        
+        # Styling
+        ax.set_title(f"{company_name} - 6 Month Price Chart", fontsize=14, fontweight='bold', pad=15)
+        ax.set_xlabel("")
+        ax.set_ylabel("Price (INR)", fontsize=11)
+        ax.grid(True, alpha=0.3)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        
+        # Format x-axis dates
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+        plt.xticks(rotation=45)
+        
+        # Add current price annotation
+        ax.annotate(f'Current: ₹{end_price:.1f}',
+                   xy=(hist.index[-1], end_price),
+                   xytext=(-80, 15),
+                   textcoords='offset points',
+                   fontsize=10,
+                   fontweight='bold',
+                   color=color)
+        
+        plt.tight_layout()
+        
+        # Save to bytes instead of file
+        buf = BytesIO()
+        plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+        buf.seek(0)
+        plt.close()
+        
+        return buf
+    except Exception as e:
+        print(f"Chart error: {e}")
+        return None
+    
 def analyze_stock(data):
     try:
         sector_info = get_sector_context(data['industry'], data['pe_ratio'], data['symbol'])
@@ -237,11 +295,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Generate chart
+    chart = generate_chart(data['symbol'], data['name'])
+    
+    # Send chart first
+    if chart:
+        await update.message.reply_photo(photo=chart)
+    
+    # Then send analysis
     analysis = analyze_stock(data)
     try:
         await update.message.reply_text(analysis, parse_mode='Markdown')
     except Exception:
-        # If Markdown fails, send as plain text
         await update.message.reply_text(analysis)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
