@@ -312,8 +312,9 @@ Rules:
 - Always leave a blank line between the verdict word and the explanation
 - {get_language_prompt(language)}
 """
+        model_to_use = "gemma2-9b-it" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
         response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=800
         )
@@ -369,8 +370,9 @@ Rules:
 - Never say consult a financial advisor
 - {get_language_prompt(language)}
 """
+        model_to_use = "gemma2-9b-it" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
         response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=800
         )
@@ -431,8 +433,9 @@ Rules:
 - Never say consult a financial advisor
 - {get_language_prompt(language)}
 """
+        model_to_use = "gemma2-9b-it" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
         response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=900
         )
@@ -856,8 +859,9 @@ Rules:
 - Never say consult a financial advisor
 - {get_language_prompt(language)}
 """
+        model_to_use = "gemma2-9b-it" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
         response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=800
         )
