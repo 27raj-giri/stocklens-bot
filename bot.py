@@ -482,19 +482,23 @@ async def send_morning_briefs(app):
 
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
-    args = context.args
     
-    if not args:
+    # Get full text after /subscribe
+    full_text = update.message.text.replace('/subscribe', '').strip()
+    
+    if not full_text:
         await update.message.reply_text(
             "Please send stock symbols after /subscribe\n\nExample: /subscribe TCS RELIANCE INFY"
         )
         return
     
+    # Split by space or comma
+    symbols = [s.strip().upper() for s in full_text.replace(',', ' ').split() if s.strip()]
+    
     added = []
     failed = []
     
-    for symbol in args:
-        symbol = symbol.upper().strip()
+    for symbol in symbols:
         data = get_stock_data(symbol)
         if data and data['price'] != 'N/A':
             try:
@@ -516,7 +520,6 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply += f"Could not find: {', '.join(failed)}"
     
     await update.message.reply_text(reply)
-
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     args = context.args
