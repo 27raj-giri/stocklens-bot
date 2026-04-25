@@ -1,11 +1,12 @@
+import os
 import yfinance as yf
 from groq import Groq
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+import logging
 
-# YOUR KEYS - paste yours here
-TELEGRAM_TOKEN = "8681269956:AAHWCDhMtAAqWNW8S0RqpKN7bX8xwidIWT8"
-GROQ_API_KEY = "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"
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
