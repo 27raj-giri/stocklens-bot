@@ -993,10 +993,10 @@ def set_user_language(chat_id, language):
 
 def get_language_prompt(language):
     prompts = {
-        'english': "Respond in clear, simple English only.",
-        'hinglish': "Respond in Hinglish - mix of simple Hindi and English. Write English words in English script and Hindi words in English script. Example: 'Yeh stock accha hai because company ki growth strong hai.'",
-        'hindi': "Respond completely in Hindi language but use English script (Roman letters), not Devanagari. Example: 'Yeh company bahut acchi hai aur iska future bright dikh raha hai.'",
-        'marathi': "Respond completely in Marathi language but use English script (Roman letters), not Devanagari. Example: 'Hi company khup changli aahe aur tichi growth strong aahe.'"
+        'english': "IMPORTANT: Write the ENTIRE response in simple English only. No Hindi or regional language words at all.",
+        'hinglish': "IMPORTANT: Write in Hinglish - naturally mix Hindi and English words together. Hindi words in Roman script. Example: 'Yeh stock accha hai because company ki growth strong hai aur profit margins bhi achhe hain.'",
+        'hindi': "IMPORTANT: Write the ENTIRE response in pure Hindi using Roman script (English letters). Every single word must be Hindi. Do not use any English words except for proper nouns like company names, numbers, and financial terms like PE, NAV, ROE. Example: 'Yeh company bahut acchi tarah se kaam karti hai. Iski amdani mein lagatar badhottari ho rahi hai. Niveeshkon ke liye yeh ek acha vikalp ho sakta hai.'",
+        'marathi': "IMPORTANT: Write the ENTIRE response in pure Marathi using Roman script (English letters). Every single word must be Marathi. Do not use any English words except for proper nouns like company names, numbers, and financial terms like PE, NAV, ROE. Example: 'Hi company khup changli aahe. Tiche utpanna satat vadhत aahe. Guntavnukdarsanchi hi ek changli nidhi aahe.'"
     }
     return prompts.get(language, prompts['hinglish'])
 
