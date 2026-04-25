@@ -1009,6 +1009,9 @@ def get_language_prompt(language):
     return prompts.get(language, prompts['hinglish'])
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    language = get_user_language(update.message.chat_id)
+    print(f"User language: {language} for chat_id: {update.message.chat_id}")
+    
     user_input = update.message.text.strip()
     print(f"Received: {user_input}")
 
