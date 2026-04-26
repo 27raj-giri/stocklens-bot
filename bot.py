@@ -210,11 +210,15 @@ def generate_chart(symbol, company_name):
 
 def format_with_bold_headings(text):
     headings = [
-        "WHAT DOES THIS COMPANY DO",
-        "WHERE IS THE STOCK RIGHT NOW",
-        "WHY THIS STOCK LOOKS GOOD",
-        "WHAT COULD GO WRONG",
-        "FINAL VERDICT",
+        "TL;DR",
+        "WHAT THIS COMPANY DOES",
+        "WHAT IS ACTUALLY HAPPENING",
+        "WHAT SMART INVESTORS ARE NOTICING",
+        "BULL VS BEAR",
+        "WHERE IT CAN GO WRONG",
+        "FINAL TAKE",
+        "VERDICT",
+        "CONFIDENCE",
         "LOOKS INTERESTING",
         "WAIT AND WATCH",
         "AVOID FOR NOW",
@@ -227,7 +231,7 @@ def format_with_bold_headings(text):
             line = f"*STOCK ANALYSIS*{stripped[14:]}"
         else:
             for heading in headings:
-                if heading in stripped.upper():
+                if stripped.upper() == heading or stripped.upper().startswith(heading + ":") or stripped.upper().startswith(heading + ";"):
                     line = f"*{stripped}*"
                     break
         new_lines.append(line)
@@ -305,37 +309,45 @@ Give analysis in this EXACT format:
 STOCK ANALYSIS - {data['name']}
 
 TL;DR
-(Write exactly 2 sharp lines. Give a clear stance — not neutral. No "it depends". 
-Example: "Strong company but currently expensive. Not the best entry point right now."
-Add one relevant emoji at the END of the second line only.)
+- (Sharp line 1 — clear stance, no neutrality)
+- (Sharp line 2 — add one relevant emoji at the END) 
 
 WHAT THIS COMPANY DOES
-(1-2 lines. Explain like telling a friend. No jargon. Add one emoji at end.)
+- (What the company does in simple words)
+- (Who are their customers and how do they make money. Add one emoji at end.)
 
 WHAT IS ACTUALLY HAPPENING
-(Interpret the numbers — don't just repeat them. What does the growth rate actually mean? Is the PE expensive or cheap vs sector? Is debt a real concern or manageable? Write 3-4 lines of real interpretation. Add one emoji at end.)
+- (What does the revenue growth actually mean in simple words)
+- (Is PE expensive or cheap vs sector average — explain simply)
+- (Is debt manageable or a real concern — be specific)
+- (What does ROE tell us about how well the company is run. Add one emoji at end.)
 
 WHAT SMART INVESTORS ARE NOTICING
-(1-2 lines of insight that goes beyond the numbers. Example: "Margins are slowly declining even though revenue is growing — that is worth watching." or "Stock is already pricing in future growth — late buyers may not see big gains." Add one emoji at end.)
+- (Insight 1 that goes beyond the numbers)
+- (Insight 2 — something most retail investors miss. Add one emoji at end.)
 
 BULL VS BEAR
-Bull case: (1-2 strong reasons to be optimistic. Add thumbs up emoji at end.)
-Bear case: (1-2 real concerns. Not generic. Add thumbs down emoji at end.)
+Bull case:
+- (Strong reason 1 to be optimistic)
+- (Strong reason 2. Add thumbs up emoji at end.)
+Bear case:
+- (Real concern 1 — specific not generic)
+- (Real concern 2. Add thumbs down emoji at end.)
 
 WHERE IT CAN GO WRONG
-- (Risk 1 — specific, not generic. No emoji.)
-- (Risk 2 — specific. No emoji.)
-- (Risk 3 — specific. No emoji.)
+- (Risk 1 — specific)
+- (Risk 2 — specific)
+- (Risk 3 — specific)
 
 FINAL TAKE
-(2-3 lines. Confident direction. Not investment advice but clear opinion.
-Example: "Right now this looks like a wait and watch situation. Strong company but price needs to correct before it becomes a good entry."
-Add one emoji at end.)
+- (Clear direction line 1)
+- (Clear direction line 2)
+- (Clear direction line 3. Add one emoji at end.)
 
 VERDICT: LOOKS INTERESTING / WAIT AND WATCH / AVOID FOR NOW
 
 CONFIDENCE: X/10
-(Rate 1-10 based on data clarity, consistency of fundamentals, and how certain the analysis is. One line explaining the score. Add one emoji at end.)
+- (One line explaining why this confidence score. Add one emoji at end.)
 
 Rules:
 - Emojis ONLY at the END of sentences, never at the beginning
