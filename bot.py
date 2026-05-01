@@ -652,7 +652,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(analysis, parse_mode='Markdown')
         except Exception:
             await query.message.reply_text(analysis)
-            
+
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     full_text = update.message.text.replace('/subscribe', '').strip()
@@ -825,6 +825,47 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message += f" | {article['date']}"
         message += "\n\n"
     await update.message.reply_text(message)
+
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.replace('/search', '').strip()
+    
+    if not query:
+        await update.message.reply_text(
+            "Type a company name after /search\n\nExamples:\n/search tata\n/search hdfc\n/search bajaj\n/search adani"
+        )
+        return
+    
+    matches = search_stocks_by_name(query)
+    
+    if not matches:
+        await update.message.reply_text(
+            f"No stocks found for '{query}'.\n\nTry:\n/search tata\n/search hdfc\n/search reliance"
+        )
+        return
+    
+    if len(matches) == 1:
+        symbol = matches[0][0]
+        language = get_user_language(update.message.chat_id)
+        await update.message.reply_text(f"Analyzing {matches[0][1]}... please wait")
+        data = get_stock_data(symbol)
+        if not data or data['price'] == 'N/A':
+            await update.message.reply_text("Could not fetch data. Please try again.")
+            return
+        chart = generate_chart(data['symbol'], data['name'])
+        if chart:
+            await update.message.reply_photo(photo=chart)
+        analysis = analyze_stock(data, language)
+        try:
+            await update.message.reply_text(analysis, parse_mode='Markdown')
+        except Exception:
+            await update.message.reply_text(analysis)
+        return
+    
+    keyboard = create_stock_keyboard(matches)
+    await update.message.reply_text(
+        f"Found {len(matches)} stocks matching '{query}'.\nWhich one do you want?",
+        reply_markup=keyboard
+    )
 
 def load_amfi_funds():
     try:
@@ -1335,6 +1376,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "8. LANGUAGE SETTINGS\n"
         "/language\n"
         "Options: English, Hinglish, Hindi, Marathi\n\n"
+        "9. SEARCH STOCKS\n"
+        "/search tata — find any stock by name\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "/help - See all commands anytime\n\n"
         "Type any stock name to get started."
@@ -1363,6 +1406,7 @@ def main():
     app.add_handler(CommandHandler("unsubscribe", unsubscribe))
     app.add_handler(CommandHandler("mysubs", my_subscriptions))
     app.add_handler(CommandHandler("trending", trending_command))
+    app.add_handler(CommandHandler("search", search_command))
     app.add_handler(CommandHandler("news", news_command))
     app.add_handler(CommandHandler("mf", mf_command))
     app.add_handler(CommandHandler("lang_english", set_english))
