@@ -16,6 +16,10 @@ from io import BytesIO
 import logging
 from datetime import datetime
 import pytz
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import CallbackQueryHandler
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import CallbackQueryHandler
 
 logging.basicConfig(level=logging.INFO)
 
@@ -26,6 +30,16 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def create_stock_keyboard(matches):
+    keyboard = []
+    for symbol, name in matches:
+        keyboard.append([InlineKeyboardButton(
+            f"{name} ({symbol})",
+            callback_data=f"analyze_{symbol}"
+        )])
+    keyboard.append([InlineKeyboardButton("Cancel", callback_data="cancel")])
+    return InlineKeyboardMarkup(keyboard)
 
 def get_user_language(chat_id):
     try:
@@ -610,6 +624,35 @@ async def send_morning_briefs(app):
     except Exception as e:
         print(f"Morning brief error: {e}")
 
+async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "cancel":
+        await query.edit_message_text("Cancelled. Send any stock name to try again.")
+        return
+    
+    if query.data.startswith("analyze_"):
+        symbol = query.data.replace("analyze_", "")
+        await query.edit_message_text(f"Analyzing {symbol}... please wait")
+        
+        language = get_user_language(query.message.chat_id)
+        data = get_stock_data(symbol)
+        
+        if not data or data['price'] == 'N/A':
+            await query.message.reply_text("Could not fetch data. Please try again.")
+            return
+        
+        chart = generate_chart(data['symbol'], data['name'])
+        if chart:
+            await query.message.reply_photo(photo=chart)
+        
+        analysis = analyze_stock(data, language)
+        try:
+            await query.message.reply_text(analysis, parse_mode='Markdown')
+        except Exception:
+            await query.message.reply_text(analysis)
+            
 async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     full_text = update.message.text.replace('/subscribe', '').strip()
@@ -948,6 +991,201 @@ async def set_marathi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_user_language(update.message.chat_id, 'marathi')
     await update.message.reply_text("Language set to Marathi.")
 
+def search_stocks_by_name(query):
+    query_lower = query.lower().strip()
+    
+    # Large database of NSE stocks with common names
+    stock_database = {
+        "tata consultancy": "TCS", "tcs": "TCS",
+        "tata consultancy services": "TCS",
+        "reliance": "RELIANCE", "reliance industries": "RELIANCE",
+        "hdfc bank": "HDFCBANK", "hdfc": "HDFCBANK",
+        "infosys": "INFY", "infy": "INFY",
+        "wipro": "WIPRO",
+        "tata motors": "TATAMOTORS", "tata motor": "TATAMOTORS",
+        "bajaj finance": "BAJFINANCE", "bajaj fin": "BAJFINANCE",
+        "adani ports": "ADANIPORTS", "adani port": "ADANIPORTS",
+        "adani enterprises": "ADANIENT", "adani": "ADANIENT",
+        "sun pharma": "SUNPHARMA", "sunpharma": "SUNPHARMA", "sun pharmaceutical": "SUNPHARMA",
+        "icici bank": "ICICIBANK", "icici": "ICICIBANK",
+        "axis bank": "AXISBANK", "axis": "AXISBANK",
+        "kotak bank": "KOTAKBANK", "kotak": "KOTAKBANK", "kotak mahindra": "KOTAKBANK",
+        "larsen": "LT", "larsen toubro": "LT", "l&t": "LT", "lt": "LT",
+        "hindustan unilever": "HINDUNILVR", "hul": "HINDUNILVR", "hindustan lever": "HINDUNILVR",
+        "asian paints": "ASIANPAINT", "asian paint": "ASIANPAINT",
+        "maruti": "MARUTI", "maruti suzuki": "MARUTI",
+        "nestle": "NESTLEIND", "nestle india": "NESTLEIND",
+        "titan": "TITAN", "titan company": "TITAN",
+        "ultratech": "ULTRACEMCO", "ultratech cement": "ULTRACEMCO",
+        "ongc": "ONGC", "oil natural gas": "ONGC",
+        "ntpc": "NTPC",
+        "power grid": "POWERGRID", "powergrid": "POWERGRID",
+        "sbi": "SBIN", "state bank": "SBIN", "state bank india": "SBIN",
+        "bajaj auto": "BAJAJ-AUTO",
+        "hero motocorp": "HEROMOTOCO", "hero": "HEROMOTOCO", "hero honda": "HEROMOTOCO",
+        "dr reddy": "DRREDDY", "dr reddys": "DRREDDY", "doctor reddy": "DRREDDY",
+        "cipla": "CIPLA",
+        "hindalco": "HINDALCO",
+        "tata steel": "TATASTEEL", "tata steel ltd": "TATASTEEL",
+        "jsw steel": "JSWSTEEL", "jsw": "JSWSTEEL",
+        "coal india": "COALINDIA",
+        "bharti airtel": "BHARTIARTL", "airtel": "BHARTIARTL", "bharti": "BHARTIARTL",
+        "hcl": "HCLTECH", "hcl tech": "HCLTECH", "hcl technologies": "HCLTECH",
+        "tech mahindra": "TECHM", "tech m": "TECHM",
+        "indusind bank": "INDUSINDBK", "indusind": "INDUSINDBK",
+        "divis labs": "DIVISLAB", "divis": "DIVISLAB", "divi": "DIVISLAB",
+        "grasim": "GRASIM",
+        "tata consumer": "TATACONSUM", "tata consumer products": "TATACONSUM",
+        "britannia": "BRITANNIA",
+        "eicher motors": "EICHERMOT", "eicher": "EICHERMOT", "royal enfield": "EICHERMOT",
+        "itc": "ITC", "itc ltd": "ITC",
+        "bajaj finserv": "BAJAJFINSV",
+        "hdfc life": "HDFCLIFE",
+        "sbi life": "SBILIFE",
+        "paytm": "PAYTM", "one97": "PAYTM",
+        "nykaa": "NYKAA", "fss": "NYKAA",
+        "dmart": "DMART", "avenue supermarts": "DMART",
+        "pidilite": "PIDILITIND", "fevicol": "PIDILITIND",
+        "berger paints": "BERGEPAINT", "berger": "BERGEPAINT",
+        "havells": "HAVELLS",
+        "voltas": "VOLTAS",
+        "godrej consumer": "GODREJCP", "godrej": "GODREJCP",
+        "dabur": "DABUR",
+        "marico": "MARICO",
+        "colgate": "COLPAL", "colgate palmolive": "COLPAL",
+        "siemens": "SIEMENS",
+        "abbott india": "ABBOTINDIA", "abbott": "ABBOTINDIA",
+        "page industries": "PAGEIND", "jockey": "PAGEIND",
+        "mrf": "MRF", "mrf tyres": "MRF",
+        "balkrishna": "BALKRISIND", "bkt": "BALKRISIND",
+        "info edge": "NAUKRI", "naukri": "NAUKRI", "jeevansathi": "NAUKRI",
+        "indiamart": "INDIAMART",
+        "zomato": "ZOMATO",
+        "swiggy": "SWIGGY",
+        "irctc": "IRCTC",
+        "indian railway": "IRCTC",
+        "interglobe": "INDIGO", "indigo": "INDIGO", "indigo airlines": "INDIGO",
+        "spicejet": "SPICEJET",
+        "sula wines": "SULA",
+        "metro brands": "METROBRAND", "metro shoes": "METROBRAND",
+        "campus activewear": "CAMPUS",
+        "trent": "TRENT", "westside": "TRENT", "zudio": "TRENT",
+        "vedanta": "VEDL", "vedl": "VEDL",
+        "hindzinc": "HINDZINC", "hindustan zinc": "HINDZINC",
+        "nmdc": "NMDC",
+        "sail": "SAIL", "steel authority": "SAIL",
+        "bhel": "BHEL", "bharat heavy": "BHEL",
+        "bpcl": "BPCL", "bharat petroleum": "BPCL",
+        "ioc": "IOC", "indian oil": "IOC",
+        "hpcl": "HPCL", "hindustan petroleum": "HPCL",
+        "gail": "GAIL", "gail india": "GAIL",
+        "torrent pharma": "TORNTPHARM", "torrent": "TORNTPHARM",
+        "lupin": "LUPIN",
+        "aurobindo": "AUROPHARMA", "aurobindo pharma": "AUROPHARMA",
+        "mankind pharma": "MANKIND",
+        "max healthcare": "MAXHEALTH",
+        "apollo hospitals": "APOLLOHOSP", "apollo": "APOLLOHOSP",
+        "fortis": "FORTIS", "fortis healthcare": "FORTIS",
+        "muthoot finance": "MUTHOOTFIN", "muthoot": "MUTHOOTFIN",
+        "shriram finance": "SHRIRAMFIN", "shriram": "SHRIRAMFIN",
+        "cholamandalam": "CHOLAFIN", "chola": "CHOLAFIN",
+        "pnb": "PNB", "punjab national bank": "PNB",
+        "bank of baroda": "BANKBARODA", "bob": "BANKBARODA",
+        "canara bank": "CANBK", "canara": "CANBK",
+        "union bank": "UNIONBANK",
+        "indian bank": "INDIANB",
+        "federal bank": "FEDERALBNK",
+        "bandhan bank": "BANDHANBNK", "bandhan": "BANDHANBNK",
+        "au small finance": "AUBANK", "au bank": "AUBANK",
+        "ujjivan": "UJJIVANSFB",
+        "polycab": "POLYCAB",
+        "dixon technologies": "DIXON", "dixon": "DIXON",
+        "amber enterprises": "AMBER",
+        "finolex": "FINPIPE", "finolex cables": "FINPIPE",
+        "whirlpool": "WHIRLPOOL",
+        "crompton": "CROMPTON", "crompton greaves": "CROMPTON",
+        "blue star": "BLUESTAR",
+        "symphony": "SYMPHONY",
+        "prestige estates": "PRESTIGE", "prestige": "PRESTIGE",
+        "godrej properties": "GODREJPROP",
+        "dlf": "DLF",
+        "oberoi realty": "OBEROIRLTY", "oberoi": "OBEROIRLTY",
+        "macrotech": "LODHA", "lodha": "LODHA",
+    }
+    
+    # Direct match first
+    if query_lower in stock_database:
+        symbol = stock_database[query_lower]
+        return [(symbol, get_full_name(symbol))]
+    
+    # Partial match — find all stocks where query is in the name
+    matches = []
+    seen_symbols = set()
+    for name, symbol in stock_database.items():
+        if query_lower in name and symbol not in seen_symbols:
+            matches.append((symbol, get_full_name(symbol)))
+            seen_symbols.add(symbol)
+    
+    return matches[:6]  # Max 6 results
+
+def get_full_name(symbol):
+    name_map = {
+        "TCS": "Tata Consultancy Services",
+        "RELIANCE": "Reliance Industries",
+        "HDFCBANK": "HDFC Bank",
+        "INFY": "Infosys",
+        "WIPRO": "Wipro",
+        "TATAMOTORS": "Tata Motors",
+        "BAJFINANCE": "Bajaj Finance",
+        "ADANIPORTS": "Adani Ports",
+        "ADANIENT": "Adani Enterprises",
+        "SUNPHARMA": "Sun Pharma",
+        "ICICIBANK": "ICICI Bank",
+        "AXISBANK": "Axis Bank",
+        "KOTAKBANK": "Kotak Mahindra Bank",
+        "LT": "Larsen & Toubro",
+        "HINDUNILVR": "Hindustan Unilever",
+        "ASIANPAINT": "Asian Paints",
+        "MARUTI": "Maruti Suzuki",
+        "NESTLEIND": "Nestle India",
+        "TITAN": "Titan Company",
+        "ULTRACEMCO": "UltraTech Cement",
+        "ONGC": "ONGC",
+        "NTPC": "NTPC",
+        "POWERGRID": "Power Grid",
+        "SBIN": "State Bank of India",
+        "BAJAJ-AUTO": "Bajaj Auto",
+        "HEROMOTOCO": "Hero MotoCorp",
+        "DRREDDY": "Dr Reddy's",
+        "CIPLA": "Cipla",
+        "HINDALCO": "Hindalco",
+        "TATASTEEL": "Tata Steel",
+        "JSWSTEEL": "JSW Steel",
+        "COALINDIA": "Coal India",
+        "BHARTIARTL": "Bharti Airtel",
+        "HCLTECH": "HCL Technologies",
+        "TECHM": "Tech Mahindra",
+        "INDUSINDBK": "IndusInd Bank",
+        "DIVISLAB": "Divi's Laboratories",
+        "GRASIM": "Grasim Industries",
+        "TATACONSUM": "Tata Consumer Products",
+        "BRITANNIA": "Britannia Industries",
+        "EICHERMOT": "Eicher Motors",
+        "ITC": "ITC",
+        "BAJAJFINSV": "Bajaj Finserv",
+        "HDFCLIFE": "HDFC Life",
+        "SBILIFE": "SBI Life",
+        "PAYTM": "Paytm",
+        "DMART": "DMart",
+        "IRCTC": "IRCTC",
+        "INDIGO": "IndiGo Airlines",
+        "ZOMATO": "Zomato",
+        "TRENT": "Trent",
+        "DLF": "DLF",
+        "LODHA": "Lodha",
+    }
+    return name_map.get(symbol, symbol)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     language = get_user_language(update.message.chat_id)
     print(f"User language: {language} for chat_id: {update.message.chat_id}")
@@ -1019,14 +1257,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(comparison)
         return
 
-    # Single stock
-    await update.message.reply_text(f"Analyzing {user_input}... please wait")
+# Single stock — try direct first
     data = get_stock_data(user_input)
+    
     if not data or data['price'] == 'N/A':
-        await update.message.reply_text(
-            "Stock not found. Try these:\n\nSymbols: TCS, RELIANCE, HDFCBANK, INFY\nNames: Infosys, Tata Motors, HDFC Bank\n\nMake sure it is listed on NSE."
-        )
+        # Try searching by name
+        matches = search_stocks_by_name(user_input)
+        
+        if not matches:
+            await update.message.reply_text(
+                "Stock not found.\n\nTry typing the company name like:\nTata Motors\nHDFC Bank\nReliance\nInfosys"
+            )
+            return
+        
+        if len(matches) == 1:
+            # Only one match — analyze directly
+            symbol = matches[0][0]
+            await update.message.reply_text(f"Analyzing {matches[0][1]}... please wait")
+            data = get_stock_data(symbol)
+            if not data or data['price'] == 'N/A':
+                await update.message.reply_text("Could not fetch data. Please try again.")
+                return
+            chart = generate_chart(data['symbol'], data['name'])
+            if chart:
+                await update.message.reply_photo(photo=chart)
+            analysis = analyze_stock(data, language)
+            try:
+                await update.message.reply_text(analysis, parse_mode='Markdown')
+            except Exception:
+                await update.message.reply_text(analysis)
+        else:
+            # Multiple matches — show buttons
+            keyboard = create_stock_keyboard(matches)
+            await update.message.reply_text(
+                f"Found {len(matches)} stocks matching '{user_input}'.\nWhich one do you want?",
+                reply_markup=keyboard
+            )
         return
+    
+    # Direct match found
+    await update.message.reply_text(f"Analyzing {user_input}... please wait")
     chart = generate_chart(data['symbol'], data['name'])
     if chart:
         await update.message.reply_photo(photo=chart)
@@ -1100,6 +1370,7 @@ def main():
     app.add_handler(CommandHandler("lang_hindi", set_hindi))
     app.add_handler(CommandHandler("lang_marathi", set_marathi))
     app.add_handler(CommandHandler("language", language_command))
+    app.add_handler(CallbackQueryHandler(handle_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     async def post_init(application):
