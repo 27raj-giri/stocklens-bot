@@ -21,6 +21,7 @@ from telegram.ext import CallbackQueryHandler
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler
 
+
 logging.basicConfig(level=logging.INFO)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -1227,6 +1228,63 @@ def get_full_name(symbol):
     }
     return name_map.get(symbol, symbol)
 
+VOICE_MAP = {
+    'english': 'en-IN-NeerjaNeural',
+    'hinglish': 'hi-IN-SwaraNeural',
+    'hindi': 'hi-IN-SwaraNeural',
+    'marathi': 'mr-IN-AarohiNeural',
+}
+
+async def text_to_speech(text, language):
+    try:
+        import edge_tts
+        from io import BytesIO
+        
+        # Clean text for TTS — remove markdown and special chars
+        clean = text.replace('*', '').replace('_', '').replace('#', '')
+        clean = clean.replace('👍', '').replace('👎', '').replace('📊', '')
+        clean = clean.replace('📉', '').replace('📈', '').replace('⭐', '')
+        clean = clean.replace('-', '').strip()
+        
+        # Limit length for TTS
+        if len(clean) > 1000:
+            clean = clean[:1000] + '...'
+        
+        voice = VOICE_MAP.get(language, 'en-IN-NeerjaNeural')
+        
+        tts = edge_tts.Communicate(clean, voice=voice)
+        
+        buf = BytesIO()
+        async for chunk in tts.stream():
+            if chunk['type'] == 'audio':
+                buf.write(chunk['data'])
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        print(f"TTS error: {e}")
+        return None
+
+def get_user_voice(chat_id):
+    try:
+        result = supabase.table("user_preferences").select("voice_enabled").eq("chat_id", chat_id).execute()
+        if result.data and result.data[0].get('voice_enabled') is not None:
+            return result.data[0]['voice_enabled']
+        return False
+    except:
+        return False
+
+def set_user_voice(chat_id, enabled):
+    try:
+        supabase.table("user_preferences").upsert({
+            "chat_id": chat_id,
+            "voice_enabled": enabled,
+            "updated_at": "now()"
+        }).execute()
+        return True
+    except Exception as e:
+        print(f"Voice set error: {e}")
+        return False
+    
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     language = get_user_language(update.message.chat_id)
     print(f"User language: {language} for chat_id: {update.message.chat_id}")
@@ -1346,6 +1404,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(analysis, parse_mode='Markdown')
     except Exception:
         await update.message.reply_text(analysis)
+    
+    if get_user_voice(update.message.chat_id):
+        voice_buf = await text_to_speech(analysis, language)
+        if voice_buf:
+            await update.message.reply_voice(voice=voice_buf)
+async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    current = get_user_voice(chat_id)
+    new_state = not current
+    set_user_voice(chat_id, new_state)
+    
+    if new_state:
+        await update.message.reply_text(
+            "Voice is now ON. I will send a voice note with every analysis.\n\nSend /voice again to turn it off."
+        )
+    else:
+        await update.message.reply_text(
+            "Voice is now OFF.\n\nSend /voice to turn it back on."
+        )
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -1378,6 +1455,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Options: English, Hinglish, Hindi, Marathi\n\n"
         "9. SEARCH STOCKS\n"
         "/search tata — find any stock by name\n\n"
+        "10. VOICE MODE\n"
+        "/voice - toggle voice on or off\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "/help - See all commands anytime\n\n"
         "Type any stock name to get started."
@@ -1394,6 +1473,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "6. TRENDING\n/trending\n\n"
         "7. NEWS\n/news TCS\n\n"
         "8. LANGUAGE\n/language\n\n"
+        "10. VOICE MODE\n"
+        "/voice - toggle voice on or off\n\n"
         "/start - Welcome\n/help - This message"
     )
 
@@ -1402,6 +1483,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("voice", voice_command))
     app.add_handler(CommandHandler("subscribe", subscribe))
     app.add_handler(CommandHandler("unsubscribe", unsubscribe))
     app.add_handler(CommandHandler("mysubs", my_subscriptions))
