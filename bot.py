@@ -375,7 +375,11 @@ Rules:
 - Always leave a blank line between sections
 - {get_language_prompt(language)}
 """
-        model_to_use = "llama-3.1-8b-instant" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
+        model_to_use = (
+            "openai/gpt-oss-20b"
+            if language in ["hindi", "marathi"]
+            else "openai/gpt-oss-120b"
+        )
         response = groq_client.chat.completions.create(
             model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
@@ -435,7 +439,11 @@ Rules:
 - Be decisive, pick a winner
 - Never say consult a financial advisor
 """
-        model_to_use = "llama-3.1-8b-instant" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
+        model_to_use = (
+            "openai/gpt-oss-20b"
+            if language in ["hindi", "marathi"]
+            else "openai/gpt-oss-120b"
+        )
         response = groq_client.chat.completions.create(
             model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
@@ -499,7 +507,11 @@ Rules:
 - Be decisive
 - Never say consult a financial advisor
 """
-        model_to_use = "llama-3.1-8b-instant" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
+        model_to_use = (
+            "openai/gpt-oss-20b"
+            if language in ["hindi", "marathi"]
+            else "openai/gpt-oss-120b"
+        )
         response = groq_client.chat.completions.create(
             model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
@@ -563,7 +575,11 @@ Rules:
 - Compare returns to FD 7% as reference
 - Never say consult a financial advisor
 """
-        model_to_use = "llama-3.1-8b-instant" if language in ['hindi', 'marathi'] else "llama-3.3-70b-versatile"
+        model_to_use = (
+            "openai/gpt-oss-20b"
+            if language in ["hindi", "marathi"]
+            else "openai/gpt-oss-120b"
+        )
         response = groq_client.chat.completions.create(
             model=model_to_use,
             messages=[{"role": "user", "content": prompt}],
