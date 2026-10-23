@@ -386,6 +386,10 @@ Rules:
             max_tokens=800
         )
         raw = response.choices[0].message.content
+
+        if not raw or not raw.strip():
+            return "Analysis could not be generated. Please try again."
+
         formatted = format_with_bold_headings(raw)
         return formatted
     except Exception as e:
