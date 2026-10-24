@@ -1,5 +1,6 @@
 import os
 import re
+import difflib
 import yfinance as yf
 import urllib.request
 import json
@@ -127,12 +128,38 @@ def get_language_prompt(language):
     }
     return prompts.get(language, prompts['hinglish'])
 
+STOCK_ALIAS_LOOKUP = {'tata consultancy': 'TCS', 'tcs': 'TCS', 'tata consultancy services': 'TCS', 'reliance': 'RELIANCE', 'reliance industries': 'RELIANCE', 'hdfc bank': 'HDFCBANK', 'hdfc': 'HDFCBANK', 'infosys': 'INFY', 'infy': 'INFY', 'wipro': 'WIPRO', 'tata motors': 'TATAMOTORS', 'tata motor': 'TATAMOTORS', 'bajaj finance': 'BAJFINANCE', 'bajaj fin': 'BAJFINANCE', 'adani ports': 'ADANIPORTS', 'adani port': 'ADANIPORTS', 'adani enterprises': 'ADANIENT', 'adani': 'ADANIENT', 'sun pharma': 'SUNPHARMA', 'sunpharma': 'SUNPHARMA', 'sun pharmaceutical': 'SUNPHARMA', 'icici bank': 'ICICIBANK', 'icici': 'ICICIBANK', 'axis bank': 'AXISBANK', 'axis': 'AXISBANK', 'kotak bank': 'KOTAKBANK', 'kotak': 'KOTAKBANK', 'kotak mahindra': 'KOTAKBANK', 'larsen': 'LT', 'larsen toubro': 'LT', 'l&t': 'LT', 'lt': 'LT', 'hindustan unilever': 'HINDUNILVR', 'hul': 'HINDUNILVR', 'hindustan lever': 'HINDUNILVR', 'asian paints': 'ASIANPAINT', 'asian paint': 'ASIANPAINT', 'maruti': 'MARUTI', 'maruti suzuki': 'MARUTI', 'nestle': 'NESTLEIND', 'nestle india': 'NESTLEIND', 'titan': 'TITAN', 'titan company': 'TITAN', 'ultratech': 'ULTRACEMCO', 'ultratech cement': 'ULTRACEMCO', 'ongc': 'ONGC', 'oil natural gas': 'ONGC', 'ntpc': 'NTPC', 'power grid': 'POWERGRID', 'powergrid': 'POWERGRID', 'sbi': 'SBIN', 'state bank': 'SBIN', 'state bank india': 'SBIN', 'bajaj auto': 'BAJAJ-AUTO', 'hero motocorp': 'HEROMOTOCO', 'hero': 'HEROMOTOCO', 'hero honda': 'HEROMOTOCO', 'dr reddy': 'DRREDDY', 'dr reddys': 'DRREDDY', 'doctor reddy': 'DRREDDY', 'cipla': 'CIPLA', 'hindalco': 'HINDALCO', 'tata steel': 'TATASTEEL', 'tata steel ltd': 'TATASTEEL', 'jsw steel': 'JSWSTEEL', 'jsw': 'JSWSTEEL', 'coal india': 'COALINDIA', 'bharti airtel': 'BHARTIARTL', 'airtel': 'BHARTIARTL', 'bharti': 'BHARTIARTL', 'hcl': 'HCLTECH', 'hcl tech': 'HCLTECH', 'hcl technologies': 'HCLTECH', 'tech mahindra': 'TECHM', 'tech m': 'TECHM', 'indusind bank': 'INDUSINDBK', 'indusind': 'INDUSINDBK', 'divis labs': 'DIVISLAB', 'divis': 'DIVISLAB', 'divi': 'DIVISLAB', 'grasim': 'GRASIM', 'tata consumer': 'TATACONSUM', 'tata consumer products': 'TATACONSUM', 'britannia': 'BRITANNIA', 'eicher motors': 'EICHERMOT', 'eicher': 'EICHERMOT', 'royal enfield': 'EICHERMOT', 'itc': 'ITC', 'itc ltd': 'ITC', 'bajaj finserv': 'BAJAJFINSV', 'hdfc life': 'HDFCLIFE', 'sbi life': 'SBILIFE', 'paytm': 'PAYTM', 'one97': 'PAYTM', 'nykaa': 'NYKAA', 'fss': 'NYKAA', 'dmart': 'DMART', 'avenue supermarts': 'DMART', 'pidilite': 'PIDILITIND', 'fevicol': 'PIDILITIND', 'berger paints': 'BERGEPAINT', 'berger': 'BERGEPAINT', 'havells': 'HAVELLS', 'voltas': 'VOLTAS', 'godrej consumer': 'GODREJCP', 'godrej': 'GODREJCP', 'dabur': 'DABUR', 'marico': 'MARICO', 'colgate': 'COLPAL', 'colgate palmolive': 'COLPAL', 'siemens': 'SIEMENS', 'abbott india': 'ABBOTINDIA', 'abbott': 'ABBOTINDIA', 'page industries': 'PAGEIND', 'jockey': 'PAGEIND', 'mrf': 'MRF', 'mrf tyres': 'MRF', 'balkrishna': 'BALKRISIND', 'bkt': 'BALKRISIND', 'info edge': 'NAUKRI', 'naukri': 'NAUKRI', 'jeevansathi': 'NAUKRI', 'indiamart': 'INDIAMART', 'zomato': 'ZOMATO', 'swiggy': 'SWIGGY', 'irctc': 'IRCTC', 'indian railway': 'IRCTC', 'interglobe': 'INDIGO', 'indigo': 'INDIGO', 'indigo airlines': 'INDIGO', 'spicejet': 'SPICEJET', 'sula wines': 'SULA', 'metro brands': 'METROBRAND', 'metro shoes': 'METROBRAND', 'campus activewear': 'CAMPUS', 'trent': 'TRENT', 'westside': 'TRENT', 'zudio': 'TRENT', 'vedanta': 'VEDL', 'vedl': 'VEDL', 'hindzinc': 'HINDZINC', 'hindustan zinc': 'HINDZINC', 'nmdc': 'NMDC', 'sail': 'SAIL', 'steel authority': 'SAIL', 'bhel': 'BHEL', 'bharat heavy': 'BHEL', 'bpcl': 'BPCL', 'bharat petroleum': 'BPCL', 'ioc': 'IOC', 'indian oil': 'IOC', 'hpcl': 'HPCL', 'hindustan petroleum': 'HPCL', 'gail': 'GAIL', 'gail india': 'GAIL', 'torrent pharma': 'TORNTPHARM', 'torrent': 'TORNTPHARM', 'lupin': 'LUPIN', 'aurobindo': 'AUROPHARMA', 'aurobindo pharma': 'AUROPHARMA', 'mankind pharma': 'MANKIND', 'max healthcare': 'MAXHEALTH', 'apollo hospitals': 'APOLLOHOSP', 'apollo': 'APOLLOHOSP', 'fortis': 'FORTIS', 'fortis healthcare': 'FORTIS', 'muthoot finance': 'MUTHOOTFIN', 'muthoot': 'MUTHOOTFIN', 'shriram finance': 'SHRIRAMFIN', 'shriram': 'SHRIRAMFIN', 'cholamandalam': 'CHOLAFIN', 'chola': 'CHOLAFIN', 'pnb': 'PNB', 'punjab national bank': 'PNB', 'bank of baroda': 'BANKBARODA', 'bob': 'BANKBARODA', 'canara bank': 'CANBK', 'canara': 'CANBK', 'union bank': 'UNIONBANK', 'indian bank': 'INDIANB', 'federal bank': 'FEDERALBNK', 'bandhan bank': 'BANDHANBNK', 'bandhan': 'BANDHANBNK', 'au small finance': 'AUBANK', 'au bank': 'AUBANK', 'ujjivan': 'UJJIVANSFB', 'polycab': 'POLYCAB', 'dixon technologies': 'DIXON', 'dixon': 'DIXON', 'amber enterprises': 'AMBER', 'finolex': 'FINPIPE', 'finolex cables': 'FINPIPE', 'whirlpool': 'WHIRLPOOL', 'crompton': 'CROMPTON', 'crompton greaves': 'CROMPTON', 'blue star': 'BLUESTAR', 'symphony': 'SYMPHONY', 'prestige estates': 'PRESTIGE', 'prestige': 'PRESTIGE', 'godrej properties': 'GODREJPROP', 'dlf': 'DLF', 'oberoi realty': 'OBEROIRLTY', 'oberoi': 'OBEROIRLTY', 'macrotech': 'LODHA', 'lodha': 'LODHA'}
+STOCK_SYMBOLS = set(STOCK_ALIAS_LOOKUP.values())
+
+def clean_company_query(user_input):
+    value = str(user_input or "").strip()
+    value = re.sub(r"^(?:hey\\s+)?(?:please\\s+)?(?:analyze|analyse|search|compare|tell me about|what about|show me|check)\\s+", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"[?!.,]+$", "", value).strip()
+    return re.sub(r"\\s+", " ", value)
+
 def resolve_symbol(user_input):
-    return str(user_input or "").strip().upper().replace(" ", "")
+    return clean_company_query(user_input).upper().replace(" ", "")
+
+def search_stocks_by_name_exact(query):
+    query_lower = clean_company_query(query).lower()
+    if query_lower in STOCK_ALIAS_LOOKUP:
+        symbol = STOCK_ALIAS_LOOKUP[query_lower]
+        return [(symbol, get_full_name(symbol))]
+    ticker = query_lower.upper()
+    if ticker.endswith((".NS", ".BO")):
+        ticker = ticker.rsplit(".", 1)[0]
+    if ticker in STOCK_SYMBOLS:
+        return [(ticker, get_full_name(ticker))]
+    return []
 
 def get_stock_data(user_input):
     try:
-        resolved = resolve_symbol(user_input)
+        clean_input = clean_company_query(user_input)
+        resolved = resolve_symbol(clean_input)
+        if not resolved.endswith((".NS", ".BO")):
+            exact_matches = search_stocks_by_name_exact(clean_input)
+            if exact_matches:
+                resolved = exact_matches[0][0]
         stock = yf.Ticker(yahoo_symbol(resolved))
         info = stock.info
         price = info.get("currentPrice") or info.get("regularMarketPrice")
@@ -277,53 +304,38 @@ def generate_chart(symbol, company_name):
         return None
 
 def format_with_bold_headings(text):
-    headings = [
-        "TL;DR",
-        "WHAT THIS COMPANY DOES",
-        "WHAT IS ACTUALLY HAPPENING",
-        "WHAT SMART INVESTORS ARE NOTICING",
-        "BULL VS BEAR",
-        "WHERE IT CAN GO WRONG",
-        "FINAL TAKE",
-        "VERDICT",
-        "CONFIDENCE",
-        "LOOKS INTERESTING",
-        "WAIT AND WATCH",
-        "AVOID FOR NOW",
-    ]
-    lines = text.split('\n')
-    new_lines = []
-    for line in lines:
+    headings = {
+        "STOCK SNAPSHOT", "IN SIMPLE WORDS", "WHAT LOOKS GOOD",
+        "RISKS TO WATCH", "IS IT EXPENSIVE OR CHEAP?", "WHAT TO CHECK NEXT",
+        "BOTTOM LINE", "TL;DR", "WHAT THIS COMPANY DOES", "WHAT IS ACTUALLY HAPPENING",
+        "WHAT SMART INVESTORS ARE NOTICING", "BULL VS BEAR", "WHERE IT CAN GO WRONG",
+        "FINAL TAKE", "VERDICT", "CONFIDENCE",
+    }
+    output = []
+    for line in text.splitlines():
         stripped = line.strip()
-        if stripped.upper().startswith("STOCK ANALYSIS"):
-            line = f"*STOCK ANALYSIS*{stripped[14:]}"
+        plain = stripped.lstrip("📊🧠✅⚠️💰🔎🧾 ").strip()
+        head = plain.split(":", 1)[0].strip().upper()
+        if head in headings or head.startswith("STOCK ANALYSIS"):
+            output.append(f"*{stripped}*")
         else:
-            for heading in headings:
-                if stripped.upper() == heading or stripped.upper().startswith(heading + ":") or stripped.upper().startswith(heading + ";"):
-                    line = f"*{stripped}*"
-                    break
-        new_lines.append(line)
-    return '\n'.join(new_lines)
+            output.append(stripped)
+    return "\n".join(output)
 
 def format_comparison_headings(text):
-    headings = [
-        "WHAT DO THESE COMPANIES DO",
-        "PRICE & VALUE",
-        "GROWTH & PROFITABILITY",
-        "RISK LEVEL",
-        "OVERALL WINNER",
-        "STOCK COMPARISON",
-    ]
-    lines = text.split('\n')
-    new_lines = []
-    for line in lines:
+    headings = {
+        "WHAT THEY DO", "NUMBERS AT A GLANCE", "STRENGTHS", "RISKS",
+        "SIMPLE TAKEAWAY", "STOCK COMPARISON",
+    }
+    output = []
+    for line in text.splitlines():
         stripped = line.strip()
-        for heading in headings:
-            if heading in stripped.upper():
-                line = f"*{stripped}*"
-                break
-        new_lines.append(line)
-    return '\n'.join(new_lines)
+        head = stripped.split(":", 1)[0].strip().upper()
+        if head in headings or head.startswith("STOCK COMPARISON"):
+            output.append(f"*{stripped}*")
+        else:
+            output.append(stripped)
+    return "\n".join(output)
 
 def format_portfolio_headings(text):
     headings = [
@@ -350,14 +362,13 @@ def format_portfolio_headings(text):
 
 def analyze_stock(data, language="hinglish"):
     try:
-        sector_info = get_sector_context(
-            data.get("industry", "N/A"), data.get("pe_ratio", "N/A"), data.get("symbol", "")
-        )
+        sector_info = get_sector_context(data.get("industry", "N/A"), data.get("pe_ratio", "N/A"), data.get("symbol", ""))
         prompt = f"""
-You are StockLens, an evidence-led Indian equity research assistant. Use only supplied facts, do not invent figures or events, and do not promise returns.
+You are StockLens, a friendly Indian stock-market explainer for beginners.
+Write a short, very readable report. Use short sentences, bullet points and blank lines. Avoid jargon or explain it simply. Never invent missing facts or promise returns.
 Company: {data.get('name')} ({data.get('symbol')})
-Current price INR: {data.get('price')}
-P/E: {data.get('pe_ratio')}
+Current price: INR {data.get('price')}
+P/E ratio: {data.get('pe_ratio')}
 52-week high/low: {data.get('52w_high')} / {data.get('52w_low')}
 Market cap: {data.get('market_cap')}
 Revenue growth: {data.get('revenue_growth')}
@@ -365,31 +376,76 @@ Profit margin: {data.get('profit_margins')}
 Debt/equity: {data.get('debt_to_equity')}
 ROE: {data.get('roe')}
 Sector/industry: {data.get('sector')} / {data.get('industry')}
-Peer valuation context: {sector_info or 'Not available'}
-Business description: {str(data.get('summary', 'N/A'))[:500]}
-Use headings: STOCK ANALYSIS, TL;DR, WHAT THE COMPANY DOES, WHAT THE DATA SAYS, VALUATION, BULL CASE, BEAR CASE AND RISKS, WHAT TO WATCH NEXT, VERDICT, CONFIDENCE.
-Be specific. Mark missing metrics as unavailable. Explain jargon. This is informational, not personalized financial advice.
+Sector valuation context: {sector_info or 'Not available'}
+Business description: {str(data.get('summary', 'N/A'))[:400]}
+
+Follow this exact structure, with blank lines between sections:
+STOCK SNAPSHOT
+• Company:
+• Current price:
+• 52-week range:
+
+IN SIMPLE WORDS
+Explain what the company does in 1-2 simple sentences.
+
+WHAT LOOKS GOOD
+• Give 2 short points supported by the data.
+
+RISKS TO WATCH
+• Give 2 short points supported by the data.
+
+IS IT EXPENSIVE OR CHEAP?
+Explain P/E simply. Compare only if comparable data exists. Share price alone does not show whether a stock is cheap.
+
+WHAT TO CHECK NEXT
+• Give 2 practical checks.
+
+BOTTOM LINE
+Give a balanced 2-sentence summary. No guaranteed buy/sell call.
+If a metric is N/A, say data is unavailable. Keep under 220 words.
 {get_language_prompt(language)}
 """
-        return format_with_bold_headings(groq_generate(prompt, language, 1100))
+        return format_with_bold_headings(groq_generate(prompt, language, 900))
     except Exception:
         logging.exception("Stock analysis failed symbol=%s", data.get("symbol"))
-        return f"AI analysis is temporarily unavailable for {data.get('name', data.get('symbol', 'this stock'))}. Please try again shortly."
+        return f"Stock data for {data.get('name', data.get('symbol', 'this company'))} was fetched, but the written analysis is temporarily unavailable. Please try again shortly."
 
 def analyze_comparison(data1, data2, language="hinglish"):
     try:
         prompt = f"""
-Compare two Indian listed companies using only the supplied data. Do not invent missing facts or promise returns.
-A: {data1.get('name')} ({data1.get('symbol')}); price={data1.get('price')}; P/E={data1.get('pe_ratio')}; sector={data1.get('sector')}; revenue growth={data1.get('revenue_growth')}; margin={data1.get('profit_margins')}; debt/equity={data1.get('debt_to_equity')}; ROE={data1.get('roe')}; 52-week range={data1.get('52w_low')}–{data1.get('52w_high')}
-B: {data2.get('name')} ({data2.get('symbol')}); price={data2.get('price')}; P/E={data2.get('pe_ratio')}; sector={data2.get('sector')}; revenue growth={data2.get('revenue_growth')}; margin={data2.get('profit_margins')}; debt/equity={data2.get('debt_to_equity')}; ROE={data2.get('roe')}; 52-week range={data2.get('52w_low')}–{data2.get('52w_high')}
-Use headings: STOCK COMPARISON, BUSINESS MODEL, VALUATION, GROWTH AND PROFITABILITY, BALANCE-SHEET RISK, KEY DIFFERENCES, BOTTOM LINE.
-A lower share price alone does not mean cheaper. Pick a relative winner only if supplied data supports it; mention missing information.
+You are StockLens, explaining two Indian stocks to a beginner. Use short bullets and simple language, not a long essay. Use only supplied facts. Never invent values or promise returns.
+Company A: {data1.get('name')} ({data1.get('symbol')})
+Price: {data1.get('price')} | P/E: {data1.get('pe_ratio')} | Growth: {data1.get('revenue_growth')} | Profit margin: {data1.get('profit_margins')} | Debt/equity: {data1.get('debt_to_equity')} | ROE: {data1.get('roe')} | Sector: {data1.get('sector')}
+Company B: {data2.get('name')} ({data2.get('symbol')})
+Price: {data2.get('price')} | P/E: {data2.get('pe_ratio')} | Growth: {data2.get('revenue_growth')} | Profit margin: {data2.get('profit_margins')} | Debt/equity: {data2.get('debt_to_equity')} | ROE: {data2.get('roe')} | Sector: {data2.get('sector')}
+
+Use this exact structure, with blank lines:
+STOCK COMPARISON: {data1.get('name')} vs {data2.get('name')}
+
+WHAT THEY DO
+• Company A: one simple sentence.
+• Company B: one simple sentence.
+
+NUMBERS AT A GLANCE
+• Valuation (P/E): compare only if the data supports it.
+• Growth and profit: compare available figures.
+• Debt and returns: compare available figures.
+
+STRENGTHS
+• One supported point for each company.
+
+RISKS
+• One supported point for each company.
+
+SIMPLE TAKEAWAY
+Explain the key difference in 2 sentences. Do not name a winner if data is insufficient. A lower share price alone does not mean cheaper.
+Keep under 260 words. Explain technical terms briefly.
 {get_language_prompt(language)}
 """
         return format_comparison_headings(groq_generate(prompt, language, 1000))
     except Exception:
         logging.exception("Comparison analysis failed symbols=%s,%s", data1.get("symbol"), data2.get("symbol"))
-        return f"Comparison for {data1.get('name')} and {data2.get('name')} is temporarily unavailable. Please try again shortly."
+        return f"Stock data was fetched for {data1.get('name')} and {data2.get('name')}, but the comparison text is temporarily unavailable. Please try again shortly."
 
 def analyze_portfolio(stocks_data, language="hinglish"):
     try:
@@ -711,7 +767,7 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\\n".join(lines)[:4000])
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.replace('/search', '').strip()
+    query = clean_company_query(update.message.text.replace('/search', '').strip())
     
     if not query:
         await update.message.reply_text(
@@ -1059,21 +1115,47 @@ def search_stocks_by_name(query):
         "oberoi realty": "OBEROIRLTY", "oberoi": "OBEROIRLTY",
         "macrotech": "LODHA", "lodha": "LODHA",
     }
-    
-    # Direct match first
+    query_lower = clean_company_query(query).lower().strip()
+    if not query_lower:
+        return []
     if query_lower in stock_database:
         symbol = stock_database[query_lower]
         return [(symbol, get_full_name(symbol))]
-    
-    # Partial match — find all stocks where query is in the name
+    ticker = query_lower.upper()
+    if ticker.endswith((".NS", ".BO")):
+        ticker = ticker.rsplit(".", 1)[0]
+    if ticker in set(stock_database.values()):
+        return [(ticker, get_full_name(ticker))]
+
     matches = []
-    seen_symbols = set()
+    seen = set()
     for name, symbol in stock_database.items():
-        if query_lower in name and symbol not in seen_symbols:
+        if query_lower in name and symbol not in seen:
             matches.append((symbol, get_full_name(symbol)))
-            seen_symbols.add(symbol)
-    
-    return matches[:6]  # Max 6 results
+            seen.add(symbol)
+    if matches:
+        return matches[:5]
+
+    # Typo-tolerant suggestions; these are shown to the user for confirmation.
+    close_names = difflib.get_close_matches(query_lower, list(stock_database.keys()), n=5, cutoff=0.45)
+    if not close_names and len(query_lower.split()) > 1:
+        scores = []
+        qtokens = set(query_lower.split())
+        for name in stock_database:
+            ntokens = set(name.split())
+            overlap = len(qtokens & ntokens) / max(1, len(qtokens | ntokens))
+            ratio = difflib.SequenceMatcher(None, query_lower, name).ratio()
+            score = max(ratio, overlap * 0.9)
+            if score >= 0.34:
+                scores.append((score, name))
+        close_names = [name for score, name in sorted(scores, reverse=True)[:5]]
+
+    suggestions = []
+    for name in close_names:
+        symbol = stock_database[name]
+        if all(item[0] != symbol for item in suggestions):
+            suggestions.append((symbol, get_full_name(symbol)))
+    return suggestions[:5]
 
 def get_full_name(symbol):
     name_map = {
@@ -1190,6 +1272,13 @@ def set_user_voice(chat_id, enabled):
         print(f"Voice set error: {e}")
         return False
     
+def create_suggestion_keyboard(matches):
+    rows = []
+    for symbol, name in matches[:5]:
+        rows.append([InlineKeyboardButton(f"{name} ({symbol})"[:60], callback_data=f"analyze_{symbol}")])
+    rows.append([InlineKeyboardButton("None of these", callback_data="cancel")])
+    return InlineKeyboardMarkup(rows)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     language = get_user_language(update.message.chat_id)
     print(f"User language: {language} for chat_id: {update.message.chat_id}")
@@ -1229,7 +1318,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Comparison mode
-    parts = re.split(r"\\s+(?:vs\\.?|versus)\\s+", user_input, maxsplit=1, flags=re.IGNORECASE)
+    parts = re.split(r"\s+(?:vs\.?|versus)\s+", user_input, maxsplit=1, flags=re.IGNORECASE)
     is_comparison = len(parts) == 2
     if is_comparison:
         stock1 = parts[0].strip()
@@ -1238,10 +1327,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data1 = get_stock_data(stock1)
         data2 = get_stock_data(stock2)
         if not data1 or data1['price'] == 'N/A':
-            await update.message.reply_text(f"Could not find data for {stock1}.")
+            suggestions = search_stocks_by_name(stock1)
+            if suggestions:
+                await update.message.reply_text(
+                    f'I couldn\'t identify "{clean_company_query(stock1)}" confidently. Did you mean one of these?',
+                    reply_markup=create_suggestion_keyboard(suggestions)
+                )
+            else:
+                await update.message.reply_text(
+                    f'I couldn\'t find "{clean_company_query(stock1)}". Try a company name or ticker such as TCS, Tata Motors, HDFC Bank or ITC.'
+                )
             return
         if not data2 or data2['price'] == 'N/A':
-            await update.message.reply_text(f"Could not find data for {stock2}.")
+            suggestions = search_stocks_by_name(stock2)
+            if suggestions:
+                await update.message.reply_text(
+                    f'I couldn\'t identify "{clean_company_query(stock2)}" confidently. Did you mean one of these?',
+                    reply_markup=create_suggestion_keyboard(suggestions)
+                )
+            else:
+                await update.message.reply_text(
+                    f'I couldn\'t find "{clean_company_query(stock2)}". Try a company name or ticker such as TCS, Tata Motors, HDFC Bank or ITC.'
+                )
             return
         chart1 = generate_chart(data1['symbol'], data1['name'])
         chart2 = generate_chart(data2['symbol'], data2['name'])
@@ -1270,8 +1377,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
+        exact_matches = search_stocks_by_name_exact(user_input)
+        if not exact_matches:
+            await update.message.reply_text(
+                f'Did you mean one of these for "{clean_company_query(user_input)}"? Please choose:',
+                reply_markup=create_suggestion_keyboard(matches)
+            )
+            return
+
         if len(matches) == 1:
-            # Only one match — analyze directly
+            # Exact company/ticker match — analyze directly
             symbol = matches[0][0]
             await update.message.reply_text(f"Analyzing {matches[0][1]}... please wait")
             data = get_stock_data(symbol)
@@ -1332,8 +1447,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "WHAT I CAN DO:\n\n"
         "1. STOCK ANALYSIS\n"
-        "Just type any stock name or symbol\n"
-        "Example: TCS or Tata Motors or HDFCBANK\n\n"
+        "Just type a company name or symbol — no ticker needed\n"
+        "Examples: TCS, Tata Motors, HDFC Bank, ITC\nIf unclear, I will suggest matching companies.\n\n"
         "2. COMPARE TWO STOCKS\n"
         "Example: TCS vs INFY\n\n"
         "3. PORTFOLIO ANALYSIS\n"
