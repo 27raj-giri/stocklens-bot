@@ -14,10 +14,10 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from io import BytesIO
 import logging
+import urllib.parse
+import xml.etree.ElementTree as ET
 from datetime import datetime
 import pytz
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import CallbackQueryHandler
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackQueryHandler
 
@@ -29,8 +29,62 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-groq_client = Groq(api_key=GROQ_API_KEY)
+_missing_env = [
+    key for key, value in {
+        "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
+        "GROQ_API_KEY": GROQ_API_KEY,
+        "SUPABASE_URL": SUPABASE_URL,
+        "SUPABASE_KEY": SUPABASE_KEY,
+    }.items() if not value
+]
+if _missing_env:
+    raise RuntimeError("Missing Railway environment variables: " + ", ".join(_missing_env))
+
+groq_client = Groq(api_key=GROQ_API_KEY, timeout=45.0, max_retries=1)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def http_read(url, timeout=15, headers=None):
+    request_headers = {"User-Agent": "Mozilla/5.0 (compatible; StockLensBot/1.0)"}
+    if headers:
+        request_headers.update(headers)
+    req = urllib.request.Request(url, headers=request_headers)
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return response.read()
+
+def yahoo_symbol(symbol):
+    symbol = str(symbol or "").strip().upper().replace(" ", "")
+    if symbol.endswith(".NS") or symbol.endswith(".BO"):
+        return symbol
+    return symbol + ".NS"
+
+def groq_generate(prompt, language="hinglish", max_tokens=1000):
+    primary = "openai/gpt-oss-20b" if language in ("hindi", "marathi") else "openai/gpt-oss-120b"
+    fallback = "openai/gpt-oss-120b" if primary.endswith("20b") else "openai/gpt-oss-20b"
+    errors = []
+    for model in (primary, fallback):
+        for attempt in range(2):
+            try:
+                response = groq_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=max_tokens,
+                    temperature=0.35,
+                )
+                if response and response.choices:
+                    choice = response.choices[0]
+                    content = getattr(choice.message, "content", None)
+                    if isinstance(content, str) and content.strip():
+                        logging.info("AI response OK model=%s chars=%s finish_reason=%s",
+                                     model, len(content), getattr(choice, "finish_reason", None))
+                        return content.strip()
+                    errors.append(f"{model}: empty content")
+                    logging.warning("AI returned empty content model=%s attempt=%s", model, attempt + 1)
+                else:
+                    errors.append(f"{model}: no choices")
+            except Exception as exc:
+                errors.append(f"{model}: {type(exc).__name__}: {exc}")
+                logging.exception("AI request failed model=%s attempt=%s", model, attempt + 1)
+    raise RuntimeError("AI generation failed after retries: " + " | ".join(errors[-4:]))
 
 def create_stock_keyboard(matches):
     keyboard = []
@@ -74,13 +128,12 @@ def get_language_prompt(language):
     return prompts.get(language, prompts['hinglish'])
 
 def resolve_symbol(user_input):
-    cleaned = user_input.strip().upper().replace(" ", "")
-    return cleaned
+    return str(user_input or "").strip().upper().replace(" ", "")
 
 def get_stock_data(user_input):
     try:
         resolved = resolve_symbol(user_input)
-        stock = yf.Ticker(resolved + ".NS")
+        stock = yf.Ticker(yahoo_symbol(resolved))
         info = stock.info
         price = info.get("currentPrice") or info.get("regularMarketPrice")
         if not price:
@@ -113,7 +166,7 @@ def get_stock_data(user_input):
 
 def get_morning_brief_data(symbol):
     try:
-        stock = yf.Ticker(symbol + ".NS")
+        stock = yf.Ticker(yahoo_symbol(symbol))
         info = stock.info
         hist = stock.history(period="2d")
         if hist.empty or len(hist) < 2:
@@ -187,7 +240,7 @@ def get_sector_context(industry, current_pe, current_symbol):
 
 def generate_chart(symbol, company_name):
     try:
-        stock = yf.Ticker(symbol + ".NS")
+        stock = yf.Ticker(yahoo_symbol(symbol))
         hist = stock.history(period="6mo")
         if hist.empty:
             return None
@@ -295,304 +348,89 @@ def format_portfolio_headings(text):
         new_lines.append(line)
     return '\n'.join(new_lines)
 
-def analyze_stock(data, language='hinglish'):
+def analyze_stock(data, language="hinglish"):
     try:
-        sector_info = get_sector_context(data['industry'], data['pe_ratio'], data['symbol'])
-        sector_line = f"- Sector Context: {sector_info}" if sector_info else ""
-        lang_prompt = get_language_prompt(language)
+        sector_info = get_sector_context(
+            data.get("industry", "N/A"), data.get("pe_ratio", "N/A"), data.get("symbol", "")
+        )
         prompt = f"""
-You are a sharp Indian stock market analyst explaining stocks to a retail investor.
-Your tone is like a smart friend who has done the research — direct, honest, conversational.
-
-Stock Data:
-- Company: {data['name']}
-- Current Price: {data['price']}
-- P/E Ratio: {data['pe_ratio']}
-- 52 Week High: {data['52w_high']}
-- 52 Week Low: {data['52w_low']}
-- Market Cap: {data['market_cap']}
-- Revenue Growth: {data['revenue_growth']}
-- Profit Margins: {data['profit_margins']}
-- Debt to Equity: {data['debt_to_equity']}
-- Return on Equity: {data['roe']}
-- Sector: {data['sector']}
-{sector_line}
-- Business: {data['summary'][:300]}
-
-Give analysis in this EXACT format:
-
-STOCK ANALYSIS - {data['name']}
-
-TL;DR
-- (Sharp line 1 — clear stance, no neutrality)
-- (Sharp line 2 — add one relevant emoji at the END) 
-
-WHAT THIS COMPANY DOES
-- (What the company does in simple words)
-- (Who are their customers and how do they make money. Add one emoji at end.)
-
-WHAT IS ACTUALLY HAPPENING
-- (What does the revenue growth actually mean in simple words)
-- (Is PE expensive or cheap vs sector average — explain simply)
-- (Is debt manageable or a real concern — be specific)
-- (What does ROE tell us about how well the company is run. Add one emoji at end.)
-
-WHAT SMART INVESTORS ARE NOTICING
-- (Insight 1 that goes beyond the numbers)
-- (Insight 2 — something most retail investors miss. Add one emoji at end.)
-
-BULL VS BEAR
-Bull case:
-- (Strong reason 1 to be optimistic)
-- (Strong reason 2. Add thumbs up emoji at end.)
-Bear case:
-- (Real concern 1 — specific not generic)
-- (Real concern 2. Add thumbs down emoji at end.)
-
-WHERE IT CAN GO WRONG
-- (Risk 1 — specific)
-- (Risk 2 — specific)
-- (Risk 3 — specific)
-
-FINAL TAKE
-- (Clear direction line 1)
-- (Clear direction line 2)
-- (Clear direction line 3. Add one emoji at end.)
-
-VERDICT: LOOKS INTERESTING / WAIT AND WATCH / AVOID FOR NOW
-
-CONFIDENCE: X/10
-- (One line explaining why this confidence score. Add one emoji at end.)
-
-Rules:
-- Emojis ONLY at the END of sentences, never at the beginning
-- Maximum one emoji per section
-- Never use financial jargon without explaining it
-- Be decisive — no neutral answers
-- No phrases like "mixed signals", "it depends", "investors should consider"
-- Use phrases like "Right now", "The real issue is", "Simple truth:", "What most people miss is"
-- Never say consult a financial advisor
-- Always leave a blank line between sections
-- {get_language_prompt(language)}
+You are StockLens, an evidence-led Indian equity research assistant. Use only supplied facts, do not invent figures or events, and do not promise returns.
+Company: {data.get('name')} ({data.get('symbol')})
+Current price INR: {data.get('price')}
+P/E: {data.get('pe_ratio')}
+52-week high/low: {data.get('52w_high')} / {data.get('52w_low')}
+Market cap: {data.get('market_cap')}
+Revenue growth: {data.get('revenue_growth')}
+Profit margin: {data.get('profit_margins')}
+Debt/equity: {data.get('debt_to_equity')}
+ROE: {data.get('roe')}
+Sector/industry: {data.get('sector')} / {data.get('industry')}
+Peer valuation context: {sector_info or 'Not available'}
+Business description: {str(data.get('summary', 'N/A'))[:500]}
+Use headings: STOCK ANALYSIS, TL;DR, WHAT THE COMPANY DOES, WHAT THE DATA SAYS, VALUATION, BULL CASE, BEAR CASE AND RISKS, WHAT TO WATCH NEXT, VERDICT, CONFIDENCE.
+Be specific. Mark missing metrics as unavailable. Explain jargon. This is informational, not personalized financial advice.
+{get_language_prompt(language)}
 """
-        model_to_use = (
-            "openai/gpt-oss-20b"
-            if language in ["hindi", "marathi"]
-            else "openai/gpt-oss-120b"
-        )
-        response = groq_client.chat.completions.create(
-            model=model_to_use,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=800
-        )
-        raw = response.choices[0].message.content
+        return format_with_bold_headings(groq_generate(prompt, language, 1100))
+    except Exception:
+        logging.exception("Stock analysis failed symbol=%s", data.get("symbol"))
+        return f"AI analysis is temporarily unavailable for {data.get('name', data.get('symbol', 'this stock'))}. Please try again shortly."
 
-        if not raw or not raw.strip():
-            return "Analysis could not be generated. Please try again."
-
-        formatted = format_with_bold_headings(raw)
-        return formatted
-    except Exception as e:
-        print(f"Groq error: {e}")
-        return f"Analysis failed: {e}"
-
-def analyze_comparison(data1, data2, language='hinglish'):
+def analyze_comparison(data1, data2, language="hinglish"):
     try:
-        lang_prompt = get_language_prompt(language)
         prompt = f"""
-{lang_prompt}
-
-You are a stock market expert comparing two Indian stocks for a complete beginner.
-Explain everything in simple language, no jargon.
-
-Stock 1: {data1['name']}
-- Price: {data1['price']}, PE: {data1['pe_ratio']}, Sector: {data1['sector']}
-- Revenue Growth: {data1['revenue_growth']}, Profit Margins: {data1['profit_margins']}
-- Debt to Equity: {data1['debt_to_equity']}, ROE: {data1['roe']}
-- 52W High: {data1['52w_high']}, 52W Low: {data1['52w_low']}
-
-Stock 2: {data2['name']}
-- Price: {data2['price']}, PE: {data2['pe_ratio']}, Sector: {data2['sector']}
-- Revenue Growth: {data2['revenue_growth']}, Profit Margins: {data2['profit_margins']}
-- Debt to Equity: {data2['debt_to_equity']}, ROE: {data2['roe']}
-- 52W High: {data2['52w_high']}, 52W Low: {data2['52w_low']}
-
-Give comparison in this EXACT format:
-
-STOCK COMPARISON: {data1['name']} vs {data2['name']}
-
-WHAT DO THESE COMPANIES DO?
-{data1['name']}: (1 line simple explanation)
-{data2['name']}: (1 line simple explanation)
-
-PRICE & VALUE:
-(Compare PE ratios simply. Which one is cheaper?)
-
-GROWTH & PROFITABILITY:
-(Compare revenue growth and margins. Which is growing faster?)
-
-RISK LEVEL:
-(Compare debt. Which one is riskier?)
-
-OVERALL WINNER:
-(Pick one stock. Explain why in 2-3 lines.)
-
-Rules:
-- No emojis
-- Simple language only
-- Be decisive, pick a winner
-- Never say consult a financial advisor
+Compare two Indian listed companies using only the supplied data. Do not invent missing facts or promise returns.
+A: {data1.get('name')} ({data1.get('symbol')}); price={data1.get('price')}; P/E={data1.get('pe_ratio')}; sector={data1.get('sector')}; revenue growth={data1.get('revenue_growth')}; margin={data1.get('profit_margins')}; debt/equity={data1.get('debt_to_equity')}; ROE={data1.get('roe')}; 52-week range={data1.get('52w_low')}–{data1.get('52w_high')}
+B: {data2.get('name')} ({data2.get('symbol')}); price={data2.get('price')}; P/E={data2.get('pe_ratio')}; sector={data2.get('sector')}; revenue growth={data2.get('revenue_growth')}; margin={data2.get('profit_margins')}; debt/equity={data2.get('debt_to_equity')}; ROE={data2.get('roe')}; 52-week range={data2.get('52w_low')}–{data2.get('52w_high')}
+Use headings: STOCK COMPARISON, BUSINESS MODEL, VALUATION, GROWTH AND PROFITABILITY, BALANCE-SHEET RISK, KEY DIFFERENCES, BOTTOM LINE.
+A lower share price alone does not mean cheaper. Pick a relative winner only if supplied data supports it; mention missing information.
+{get_language_prompt(language)}
 """
-        model_to_use = (
-            "openai/gpt-oss-20b"
-            if language in ["hindi", "marathi"]
-            else "openai/gpt-oss-120b"
-        )
-        response = groq_client.chat.completions.create(
-            model=model_to_use,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=800
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"Comparison error: {e}")
-        return f"Comparison failed: {e}"
+        return format_comparison_headings(groq_generate(prompt, language, 1000))
+    except Exception:
+        logging.exception("Comparison analysis failed symbols=%s,%s", data1.get("symbol"), data2.get("symbol"))
+        return f"Comparison for {data1.get('name')} and {data2.get('name')} is temporarily unavailable. Please try again shortly."
 
-def analyze_portfolio(stocks_data, language='hinglish'):
+def analyze_portfolio(stocks_data, language="hinglish"):
     try:
-        stocks_summary = ""
-        for d in stocks_data:
-            stocks_summary += f"""
-- {d['name']} ({d['symbol']}):
-  Price: {d['price']}, PE: {d['pe_ratio']}, Sector: {d['sector']}
-  Revenue Growth: {d['revenue_growth']}, Profit Margins: {d['profit_margins']}
-  Debt to Equity: {d['debt_to_equity']}, ROE: {d['roe']}
-"""
-        sectors = [d['sector'] for d in stocks_data if d['sector'] != 'N/A']
-        sector_counts = {}
-        for s in sectors:
-            sector_counts[s] = sector_counts.get(s, 0) + 1
-        sector_summary = ", ".join([f"{k}: {v} stock(s)" for k, v in sector_counts.items()])
-        lang_prompt = get_language_prompt(language)
+        summary = "\\n".join(
+            f"- {d.get('name')} ({d.get('symbol')}): price={d.get('price')}, P/E={d.get('pe_ratio')}, "
+            f"sector={d.get('sector')}, growth={d.get('revenue_growth')}, margin={d.get('profit_margins')}, "
+            f"debt/equity={d.get('debt_to_equity')}, ROE={d.get('roe')}"
+            for d in stocks_data
+        )
         prompt = f"""
-{lang_prompt}
-
-You are a stock market expert reviewing a beginner investor's portfolio in India.
-Explain everything in very simple language. No jargon.
-
-The investor holds these stocks:
-{stocks_summary}
-
-Sector breakdown: {sector_summary}
-
-Give portfolio analysis in this EXACT format:
-
-PORTFOLIO ANALYSIS
-
-WHAT YOU OWN:
-(List each stock in 1 line - what the company does in simplest words)
-
-SECTOR CONCENTRATION:
-(Are they too focused in one sector? Explain diversification simply.)
-
-STRONGEST STOCK:
-(Which stock looks best? Say why simply.)
-
-WEAKEST STOCK:
-(Which stock looks worst or riskiest? Say why simply.)
-
-OVERALL PORTFOLIO HEALTH:
-(Rate as STRONG / MODERATE / NEEDS ATTENTION)
-(Explain in 3-4 lines.)
-
-Rules:
-- No emojis
-- Simple language only
-- Be decisive
-- Never say consult a financial advisor
+Review this Indian stock portfolio using only these metrics. Do not invent facts or promise returns.
+Holdings:
+{summary}
+Use headings: PORTFOLIO ANALYSIS, WHAT YOU OWN, SECTOR CONCENTRATION, RELATIVE STRENGTHS, MAIN RISKS, OVERALL PORTFOLIO REVIEW.
+Explain limitations and missing metrics.
+{get_language_prompt(language)}
 """
-        model_to_use = (
-            "openai/gpt-oss-20b"
-            if language in ["hindi", "marathi"]
-            else "openai/gpt-oss-120b"
-        )
-        response = groq_client.chat.completions.create(
-            model=model_to_use,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=900
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"Portfolio error: {e}")
-        return f"Portfolio analysis failed: {e}"
+        return format_portfolio_headings(groq_generate(prompt, language, 1000))
+    except Exception:
+        logging.exception("Portfolio analysis failed")
+        return "Portfolio analysis is temporarily unavailable. Please try again shortly."
 
-def analyze_mutual_fund(fund, returns, meta, language='hinglish'):
+def analyze_mutual_fund(fund, returns, meta, language="hinglish"):
     try:
-        returns_text = ""
-        if '1m' in returns:
-            returns_text += f"- 1 Month Return: {returns['1m']}%\n"
-        if '6m' in returns:
-            returns_text += f"- 6 Month Return: {returns['6m']}%\n"
-        if '1y' in returns:
-            returns_text += f"- 1 Year Return: {returns['1y']}%\n"
-        if '3y' in returns:
-            returns_text += f"- 3 Year Return: {returns['3y']}%\n"
-        lang_prompt = get_language_prompt(language)
+        returns_text = ", ".join(f"{period}: {value}%" for period, value in (returns or {}).items()) or "Unavailable"
         prompt = f"""
-{lang_prompt}
-
-You are a mutual fund expert explaining funds to complete beginners in India.
-Explain everything in very simple language. No jargon.
-
-Fund Details:
-- Fund Name: {fund['name']}
-- Fund House: {meta.get('fund_house', 'N/A')}
-- Category: {meta.get('scheme_category', 'N/A')}
-- Type: {meta.get('scheme_type', 'N/A')}
-- Current NAV: {fund['nav']}
-- NAV Date: {fund['date']}
-{returns_text}
-
-Give analysis in this EXACT format:
-
-MUTUAL FUND ANALYSIS - {fund['name'][:50]}
-
-WHAT IS THIS FUND?
-(Explain in 1-2 lines what kind of fund this is. No jargon.)
-
-HOW HAS IT PERFORMED?
-(Explain returns simply. Compare to FD rate of 7% as benchmark.)
-
-WHO SHOULD INVEST?
-(What kind of person is this fund good for?)
-
-RISK LEVEL:
-(LOW / MEDIUM / HIGH - explain why simply.)
-
-FINAL VERDICT:
-(LOOKS GOOD / AVERAGE / NOT RECOMMENDED)
-(Write 2-3 lines explaining the verdict.)
-
-Rules:
-- No emojis
-- Simple language only
-- Compare returns to FD 7% as reference
-- Never say consult a financial advisor
+Explain this Indian mutual fund to a beginner. Past returns do not guarantee future performance.
+Fund: {fund.get('name')}
+Fund house: {meta.get('fund_house', 'N/A')}
+Category: {meta.get('scheme_category', 'N/A')}
+Type: {meta.get('scheme_type', 'N/A')}
+Latest NAV: {fund.get('nav', 'N/A')} as of {fund.get('date', 'N/A')}
+Calculated historical returns: {returns_text}
+Use headings: MUTUAL FUND ANALYSIS, WHAT THIS FUND INVESTS IN, PERFORMANCE, RISK AND LIMITATIONS, WHO MAY FIND IT SUITABLE, VERDICT.
+State clearly when information is unavailable. 7% is only an illustrative comparison, not a guaranteed or equivalent benchmark.
+{get_language_prompt(language)}
 """
-        model_to_use = (
-            "openai/gpt-oss-20b"
-            if language in ["hindi", "marathi"]
-            else "openai/gpt-oss-120b"
-        )
-        response = groq_client.chat.completions.create(
-            model=model_to_use,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=800
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"Fund analysis error: {e}")
-        return f"Analysis failed: {e}"
+        return format_fund_headings(groq_generate(prompt, language, 900))
+    except Exception:
+        logging.exception("Mutual fund analysis failed scheme=%s", fund.get("code"))
+        return "Mutual fund analysis is temporarily unavailable. NAV data may still be available above."
 
 def format_fund_headings(text):
     headings = [
@@ -755,7 +593,7 @@ def get_trending_stocks():
         movers = []
         for symbol in NIFTY50:
             try:
-                stock = yf.Ticker(symbol + ".NS")
+                stock = yf.Ticker(yahoo_symbol(symbol))
                 hist = stock.history(period="2d")
                 if len(hist) < 2:
                     continue
@@ -780,28 +618,47 @@ def get_trending_stocks():
         return None
 
 def get_stock_news(symbol, company_name):
+    articles = []
     try:
-        stock = yf.Ticker(symbol + ".NS")
-        news = stock.news
-        if not news:
-            return None
-        articles = []
-        for item in news[:5]:
-            content = item.get('content', {})
-            title = content.get('title', '')
-            summary = content.get('summary', '')
-            source = content.get('provider', {}).get('displayName', '')
-            pub_date = content.get('pubDate', '')
+        raw_news = yf.Ticker(yahoo_symbol(symbol)).news or []
+        for item in raw_news[:10]:
+            content = item.get("content") if isinstance(item.get("content"), dict) else item
+            title = content.get("title") or item.get("title") or ""
+            summary = content.get("summary") or item.get("summary") or ""
+            provider = content.get("provider") or item.get("publisher") or {}
+            source = provider.get("displayName") if isinstance(provider, dict) else str(provider)
+            pub_date = content.get("pubDate") or ""
+            if not pub_date and item.get("providerPublishTime"):
+                try:
+                    pub_date = datetime.fromtimestamp(int(item["providerPublishTime"]), pytz.UTC).strftime("%Y-%m-%d")
+                except Exception:
+                    pub_date = ""
             if title:
-                articles.append({
-                    "title": title,
-                    "summary": summary[:200] if summary else '',
-                    "source": source,
-                    "date": pub_date[:10] if pub_date else ''
-                })
-        return articles if articles else None
-    except Exception as e:
-        print(f"News error: {e}")
+                articles.append({"title": title, "summary": str(summary)[:250],
+                                 "source": source or "Yahoo Finance", "date": str(pub_date)[:16]})
+    except Exception:
+        logging.exception("Yahoo news failed symbol=%s", symbol)
+    if articles:
+        return articles[:5]
+    try:
+        query = urllib.parse.quote(f'"{company_name}" stock India')
+        rss_url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
+        root = ET.fromstring(http_read(rss_url, timeout=15))
+        for item in root.findall("./channel/item")[:8]:
+            title = (item.findtext("title") or "").strip()
+            if not title:
+                continue
+            description = (item.findtext("description") or "").strip()
+            articles.append({
+                "title": title,
+                "summary": re.sub(r"<[^>]+>", " ", description)[:250],
+                "source": item.findtext("source") or "Google News",
+                "date": (item.findtext("pubDate") or "")[:16],
+                "url": (item.findtext("link") or "").strip(),
+            })
+        return articles[:5] or None
+    except Exception:
+        logging.exception("Google News fallback failed company=%s", company_name)
         return None
 
 async def trending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -820,32 +677,38 @@ async def trending_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message)
 
 async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = update.message.text.replace('/news', '').strip()
-    if not args:
+    query = update.message.text.partition(" ")[2].strip()
+    if not query:
+        await update.message.reply_text("Please send a stock symbol after /news\\n\\nExample: /news TCS")
+        return
+    await update.message.reply_text(f"Fetching news for {query}... please wait")
+    data = get_stock_data(query)
+    if not data or data.get("price") in (None, "N/A"):
+        matches = search_stocks_by_name(query)
+        if matches:
+            data = get_stock_data(matches[0][0])
+    if not data or data.get("price") in (None, "N/A"):
+        await update.message.reply_text("Stock not found. Please check the company name or NSE symbol.")
+        return
+    articles = get_stock_news(data["symbol"], data["name"])
+    if not articles:
         await update.message.reply_text(
-            "Please send a stock symbol after /news\n\nExample: /news TCS"
+            f"I couldn't retrieve news for {data['name']} right now. This does not necessarily mean there is no recent news. Please try again shortly."
         )
         return
-    await update.message.reply_text(f"Fetching news for {args}... please wait")
-    data = get_stock_data(args)
-    if not data or data['price'] == 'N/A':
-        await update.message.reply_text("Stock not found. Please check the symbol.")
-        return
-    articles = get_stock_news(data['symbol'], data['name'])
-    if not articles:
-        await update.message.reply_text(f"No recent news found for {data['name']}.")
-        return
-    message = f"LATEST NEWS: {data['name']}\n\n"
+    lines = [f"LATEST NEWS: {data['name']}", ""]
     for i, article in enumerate(articles, 1):
-        message += f"{i}. {article['title']}\n"
-        if article['summary']:
-            message += f"{article['summary'][:150]}...\n"
-        if article['source']:
-            message += f"Source: {article['source']}"
-        if article['date']:
-            message += f" | {article['date']}"
-        message += "\n\n"
-    await update.message.reply_text(message)
+        lines.append(f"{i}. {article['title']}")
+        if article.get("summary"):
+            lines.append(article["summary"])
+        source_line = "Source: " + str(article.get("source") or "Unknown")
+        if article.get("date"):
+            source_line += " | " + str(article["date"])
+        lines.append(source_line)
+        if article.get("url"):
+            lines.append(article["url"])
+        lines.append("")
+    await update.message.reply_text("\\n".join(lines)[:4000])
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.replace('/search', '').strip()
@@ -890,22 +753,49 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def load_amfi_funds():
     try:
-        data = urllib.request.urlopen('https://www.amfiindia.com/spages/NAVAll.txt').read().decode('utf-8')
-        lines = data.split('\n')
+        raw = http_read("https://www.amfiindia.com/spages/NAVAll.txt", timeout=18).decode("utf-8-sig", errors="replace")
         funds = []
-        for line in lines:
-            parts = line.strip().split(';')
-            if len(parts) == 6:
-                funds.append({
-                    'code': parts[0].strip(),
-                    'name': parts[3].strip(),
-                    'nav': parts[4].strip(),
-                    'date': parts[5].strip()
-                })
+        for line in raw.splitlines():
+            parts = [part.strip() for part in line.split(";")]
+            if len(parts) >= 6 and parts[0].isdigit() and parts[3]:
+                funds.append({"code": parts[0], "name": parts[3], "nav": parts[4], "date": parts[5]})
+        if funds:
+            logging.info("Loaded %s schemes from AMFI", len(funds))
+            return funds
+        logging.warning("AMFI returned no parseable scheme rows")
+    except Exception:
+        logging.exception("AMFI NAV source failed; trying mfapi fallback")
+    try:
+        schemes = json.loads(http_read("https://api.mfapi.in/mf", timeout=25).decode("utf-8"))
+        funds = []
+        for item in schemes if isinstance(schemes, list) else []:
+            code_value = str(item.get("schemeCode", "")).strip()
+            name = str(item.get("schemeName", "")).strip()
+            if code_value.isdigit() and name:
+                funds.append({"code": code_value, "name": name, "nav": "", "date": ""})
+        logging.info("Loaded %s schemes from mfapi fallback", len(funds))
         return funds
-    except Exception as e:
-        print(f"AMFI load error: {e}")
+    except Exception:
+        logging.exception("mfapi scheme list failed")
         return []
+
+def fetch_fund_details(scheme_code):
+    try:
+        raw = http_read(f"https://api.mfapi.in/mf/{urllib.parse.quote(str(scheme_code))}", timeout=18)
+        payload = json.loads(raw.decode("utf-8"))
+        meta = payload.get("meta") or {}
+        nav_data = payload.get("data") or []
+        latest = nav_data[0] if nav_data else {}
+        fund = {
+            "code": str(scheme_code),
+            "name": meta.get("scheme_name") or meta.get("schemeName") or "",
+            "nav": latest.get("nav", "N/A"),
+            "date": latest.get("date", "N/A"),
+        }
+        return fund, meta, nav_data
+    except Exception:
+        logging.exception("Fund details fetch failed scheme=%s", scheme_code)
+        return None, {}, []
 
 def search_fund(query, funds):
     query_lower = query.lower()
@@ -923,35 +813,28 @@ def search_fund(query, funds):
 
 def get_fund_returns(scheme_code):
     try:
-        url = f"https://api.mfapi.in/mf/{scheme_code}"
-        data = json.loads(urllib.request.urlopen(url).read())
-        nav_data = data['data']
+        _, _, nav_data = fetch_fund_details(scheme_code)
         if len(nav_data) < 2:
-            return None
-        current_nav = float(nav_data[0]['nav'])
+            return {}
+        current_nav = float(nav_data[0]["nav"])
         returns = {}
-        if len(nav_data) >= 30:
-            nav_1m = float(nav_data[29]['nav'])
-            returns['1m'] = round(((current_nav - nav_1m) / nav_1m) * 100, 2)
-        if len(nav_data) >= 180:
-            nav_6m = float(nav_data[179]['nav'])
-            returns['6m'] = round(((current_nav - nav_6m) / nav_6m) * 100, 2)
-        if len(nav_data) >= 365:
-            nav_1y = float(nav_data[364]['nav'])
-            returns['1y'] = round(((current_nav - nav_1y) / nav_1y) * 100, 2)
-        if len(nav_data) >= 1095:
-            nav_3y = float(nav_data[1094]['nav'])
-            returns['3y'] = round(((current_nav - nav_3y) / nav_3y) * 100, 2)
+        for key, days in (("1m", 30), ("6m", 180), ("1y", 365), ("3y", 1095)):
+            if len(nav_data) > days:
+                past_nav = float(nav_data[days]["nav"])
+                if past_nav:
+                    returns[key] = round((current_nav - past_nav) / past_nav * 100, 2)
         return returns
-    except Exception as e:
-        print(f"Fund returns error: {e}")
-        return None
+    except Exception:
+        logging.exception("Fund returns calculation failed scheme=%s", scheme_code)
+        return {}
 
 def generate_fund_chart(scheme_code, fund_name):
     try:
         url = f"https://api.mfapi.in/mf/{scheme_code}"
-        data = json.loads(urllib.request.urlopen(url).read())
-        nav_data = data['data'][:365]
+        data = json.loads(http_read(url, timeout=18).decode('utf-8'))
+        nav_data = (data.get('data') or [])[:365]
+        if len(nav_data) < 2:
+            return None
         nav_data.reverse()
         dates = [item['date'] for item in nav_data]
         navs = [float(item['nav']) for item in nav_data]
@@ -988,40 +871,42 @@ def generate_fund_chart(scheme_code, fund_name):
         return None
 
 async def mf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.replace('/mf', '').strip()
+    query = update.message.text.partition(" ")[2].strip()
     if not query:
         await update.message.reply_text(
-            "Please send a fund name after /mf\n\nExamples:\n/mf Parag Parikh Flexi Cap\n/mf Mirae Asset Large Cap\n/mf SBI Small Cap\n/mf Axis Bluechip"
+            "Please send a fund name after /mf\\n\\nExamples:\\n"
+            "/mf Parag Parikh Flexi Cap\\n/mf Mirae Asset Large Cap\\n"
+            "/mf SBI Small Cap\\n/mf Axis Bluechip"
         )
         return
     await update.message.reply_text(f"Searching for {query}... please wait")
     funds = load_amfi_funds()
     if not funds:
-        await update.message.reply_text("Could not load fund data. Try again later.")
+        await update.message.reply_text("Fund data sources are temporarily unavailable. Please try again shortly.")
         return
     results = search_fund(query, funds)
     if not results:
-        await update.message.reply_text(
-            f"No fund found for '{query}'.\n\nTry:\n/mf Parag Parikh Flexi Cap\n/mf Mirae Asset Large Cap\n/mf SBI Small Cap"
-        )
+        await update.message.reply_text(f"No fund found for '{query}'. Try a more specific name.")
         return
     fund = results[0]
-    await update.message.reply_text(f"Found: {fund['name']}\nFetching analysis...")
-    returns = get_fund_returns(fund['code'])
-    try:
-        url = f"https://api.mfapi.in/mf/{fund['code']}"
-        meta_data = json.loads(urllib.request.urlopen(url).read())
-        meta = meta_data.get('meta', {})
-    except:
-        meta = {}
-    chart = generate_fund_chart(fund['code'], fund['name'])
+    await update.message.reply_text(f"Found: {fund['name']}\\nFetching NAV history...")
+    detailed, meta, nav_data = fetch_fund_details(fund["code"])
+    if detailed:
+        fund.update({k: v for k, v in detailed.items() if v not in (None, "")})
+        if not fund.get("name"):
+            fund["name"] = results[0]["name"]
+    returns = get_fund_returns(fund["code"]) or {}
+    chart = generate_fund_chart(fund["code"], fund["name"])
     if chart:
         await update.message.reply_photo(photo=chart)
+    else:
+        await update.message.reply_text(
+            f"Latest NAV: {fund.get('nav', 'N/A')} | Date: {fund.get('date', 'N/A')}"
+        )
     language = get_user_language(update.message.chat_id)
-    analysis = analyze_mutual_fund(fund, returns or {}, meta, language)
-    formatted = format_fund_headings(analysis)
+    analysis = analyze_mutual_fund(fund, returns, meta, language)
     try:
-        await update.message.reply_text(formatted, parse_mode='Markdown')
+        await update.message.reply_text(analysis, parse_mode="Markdown")
     except Exception:
         await update.message.reply_text(analysis)
 
@@ -1344,13 +1229,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Comparison mode
-    comparison_keywords = [' vs ', ' VS ', ' Vs ', ' versus ']
-    is_comparison = any(kw in user_input for kw in comparison_keywords)
+    parts = re.split(r"\\s+(?:vs\\.?|versus)\\s+", user_input, maxsplit=1, flags=re.IGNORECASE)
+    is_comparison = len(parts) == 2
     if is_comparison:
-        for kw in comparison_keywords:
-            if kw in user_input:
-                parts = user_input.split(kw)
-                break
         stock1 = parts[0].strip()
         stock2 = parts[1].strip()
         await update.message.reply_text(f"Comparing {stock1} vs {stock2}... please wait")
@@ -1499,7 +1380,24 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    async def post_init(application):
+        scheduler = AsyncIOScheduler(timezone=pytz.timezone("Asia/Kolkata"))
+        scheduler.add_job(
+            send_morning_briefs,
+            trigger="cron",
+            hour=9,
+            minute=0,
+            args=[application],
+            id="daily_morning_briefs",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        scheduler.start()
+        application.bot_data["scheduler"] = scheduler
+        logging.info("Daily morning brief scheduler started at 09:00 Asia/Kolkata")
+
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
@@ -1519,13 +1417,6 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    async def post_init(application):
-        scheduler = AsyncIOScheduler(timezone=pytz.timezone('Asia/Kolkata'))
-        scheduler.add_job(send_morning_briefs, 'cron', hour=9, minute=0, args=[application])
-        scheduler.start()
-        print("Scheduler started")
-
-    app.post_init = post_init
     print("Bot is running...")
     app.run_polling()
 
